@@ -27,6 +27,9 @@ from app.eli.identity_service import IdentityService
 from app.eli.rule_confirmation import RuleConfirmationProcessor
 from app.eli.rule_proposal_detector import RuleProposalDetector
 from app.eli.state_service import StateService
+from app.eli.goal_detector import should_run_detector, schedule_detection
+from app.eli.goal_taught_detector import TaughtGoalDetector
+from app.eli.goal_service import GoalService
 from app.core.context_builder import ContextBuilder
 from app.core.decision_engine import DecisionEngine
 from app.core.intent_classifier import HybridIntentClassifier
@@ -156,6 +159,37 @@ class Orchestrator:
                 # ---------------------------------------------------- #
                 # 0.b) Detectar propuesta de regla nueva
                 # ---------------------------------------------------- #
+        
+                # ---------------------------------------------------- #
+                # 0.c) Detectar meta enseñada explícitamente
+                #      ("aprende sobre X", "quiero que explores Y")
+                # ---------------------------------------------------- #
+                async with trace.step("detect_taught_goal") as s:
+                    try:
+                        taught_detector = TaughtGoalDetector(session, self.provider)
+                        taught_goal = await taught_detector.maybe_create_taught_goal(
+                            user_id=req.user_id,
+                            conversation_id=conv.id,
+                            message=req.message,
+                        )
+                        if taught_goal is not None:
+                            s["meta"]["goal_id"] = str(taught_goal.id)
+                            s["meta"]["kind"] = taught_goal.kind
+                            yield {
+                                "type": "goal_created",
+                                "goal_id": str(taught_goal.id),
+                                "kind": taught_goal.kind,
+                                "content": taught_goal.content,
+                                "origin": "TAUGHT",
+                            }
+                    except Exception as exc:
+                        log.warning(
+                            "taught_goal_detection_failed",
+                            request_id=trace.request_id,
+                            error=str(exc),
+                        )
+                        s["meta"]["error"] = str(exc)
+
                 pending_proposal_block: str | None = None
                 async with trace.step("detect_rule_proposal") as s:
                     try:
@@ -249,6 +283,22 @@ class Orchestrator:
                 if should_inject_datetime(req.message):
                     extra_blocks.append(build_datetime_block())
 
+                # 1.a.4) Metas propias de ELI
+                async with trace.step("load_goals") as s:
+                    try:
+                        goal_service = GoalService(session)
+                        goals_block = await goal_service.build_goals_block()
+                        if goals_block:
+                            extra_blocks.append(goals_block)
+                        active_count = await goal_service.count_active()
+                        s["meta"]["active_goals"] = active_count
+                    except Exception as exc:
+                        log.warning(
+                            "goals_load_failed",
+                            request_id=trace.request_id,
+                            error=str(exc),
+                        )
+                        s["meta"]["goals_error"] = str(exc)
                 # 1.a.4) Búsqueda web (solo si la pregunta lo pide)
                 if should_search_web(req.message):
                     async with trace.step("web_search") as s:
@@ -512,7 +562,7 @@ class Orchestrator:
                 # ---------------------------------------------------- #
                 # 7) Tareas de fondo
                 # ---------------------------------------------------- #
-                # 7.a) Tick del estado interno
+                                # 7.a) Tick del estado interno
                 async with trace.step("tick_state") as s:
                     try:
                         state_service = StateService(session, self.provider)
@@ -525,6 +575,47 @@ class Orchestrator:
                             request_id=trace.request_id,
                             error=str(exc),
                         )
+
+                # 7.a.2) Detector de metas propias (cada 10 turnos o mensaje largo)
+                async with trace.step("maybe_detect_goal") as s:
+                    try:
+                        meta = dict(conv.meta or {})
+                        turns = int(meta.get("turns_since_goal_detect", 0)) + 1
+
+                        if should_run_detector(
+                            message=req.message,
+                            turns_since_last_detect=turns,
+                        ):
+                            s["meta"]["triggered"] = True
+                            s["meta"]["turns_accumulated"] = turns
+                            meta["turns_since_goal_detect"] = 0
+                            schedule_detection(self.provider, conv.id)
+                        else:
+                            s["meta"]["triggered"] = False
+                            s["meta"]["turns_accumulated"] = turns
+                            meta["turns_since_goal_detect"] = turns
+
+                        conv.meta = meta
+                    except Exception as exc:
+                        log.warning(
+                            "goal_detect_schedule_failed",
+                            request_id=trace.request_id,
+                            error=str(exc),
+                        )
+                        s["meta"]["error"] = str(exc)
+
+                # 7.b) Extracción de memoria y summarización (async)
+                if self.memory is not None:
+                    self.memory.schedule_extraction(
+                        user_id=req.user_id,
+                        conversation_id=conv.id,
+                        user_message=req.message,
+                        assistant_message=final_text,
+                    )
+                    self.memory.schedule_summarization(
+                        user_id=req.user_id,
+                        conversation_id=conv.id,
+                    )
 
                 # 7.b) Extracción de memoria y summarización (async)
                 if self.memory is not None:
