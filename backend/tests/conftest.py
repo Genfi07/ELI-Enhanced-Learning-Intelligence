@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 os.environ.setdefault("ELI_ENV", "test")
 os.environ.setdefault("ELI_COOKIE_SECURE", "false")
 os.environ.setdefault("ELI_EMBEDDINGS_PROVIDER", "fake")
+os.environ.setdefault("ELI_LLM_PROVIDER", "fake")
 os.environ.setdefault("ELI_MEMORY_EXTRACTION_ENABLED", "false")
 os.environ.setdefault("ELI_SUMMARIZATION_ENABLED", "false")
 os.environ.setdefault("ELI_INGESTION_ENABLED", "false")

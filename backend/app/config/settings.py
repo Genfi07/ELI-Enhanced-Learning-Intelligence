@@ -17,22 +17,48 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://eli:eli@localhost:5432/eli"
     )
 
-    # LLM
+    # LLM — proveedor primario
     llm_provider: Literal["openai", "fake"] = "fake"
     llm_default_model: str = "gpt-4o-mini"
     llm_deep_model: str = "gpt-4o"
     llm_request_timeout_s: int = 120
+
+    # Cadena de fallback
+    llm_fallback_chain: str = ""
+
+    # Groq (primario)
     openai_api_key: str | None = None
-    # base_url del endpoint OpenAI-compatible:
-    #   OpenAI:   (vacío) o "https://api.openai.com/v1"
-    #   DeepSeek: "https://api.deepseek.com"
-    #   Ollama:   "http://localhost:11434/v1"
     openai_base_url: str | None = None
 
-    # Embeddings (independiente del chat)
-    #   "openai" → OpenAI real
-    #   "ollama" → Ollama local (nomic-embed-text, padded a 1536)
-    #   "fake"   → hash determinista (dev/test)
+    # Mistral — free plan, ~1B tokens/mes
+    mistral_api_key: str | None = None
+    mistral_base_url: str = "https://api.mistral.ai/v1"
+    mistral_model: str = "ministral-3b-2512"
+
+    # Cerebras — sin free tier (jul 2026)
+    cerebras_api_key: str | None = None
+    cerebras_base_url: str = "https://api.cerebras.ai/v1"
+    cerebras_model: str = "qwen-3.8-27b"
+
+    # SambaNova — sin free tier
+    sambanova_api_key: str | None = None
+    sambanova_base_url: str = "https://api.sambanova.ai/v1"
+    sambanova_model: str = "gpt-oss-120b"
+
+    # OpenRouter
+    openrouter_api_key: str | None = None
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_model: str = "openrouter/free"
+
+    # Google Gemini
+    gemini_api_key: str | None = None
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    gemini_model: str = "gemini-3.5-flash-lite"
+
+    # Ollama chat (local)
+    ollama_chat_model: str = "qwen2.5:3b"
+
+    # Embeddings
     embeddings_provider: Literal["openai", "ollama", "fake"] = "fake"
     ollama_base_url: str = "http://localhost:11434"
     ollama_embeddings_model: str = "nomic-embed-text"
