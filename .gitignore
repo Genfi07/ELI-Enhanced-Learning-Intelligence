@@ -64,3 +64,5 @@ alembic/versions/__pycache__/
 
 # === Archivos raros ===
 backend/app/db/models/_
+# Archivos basura de curl/redirects
+/main
