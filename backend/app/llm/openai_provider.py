@@ -21,19 +21,30 @@ class OpenAIProvider:
             "timeout": settings.llm_request_timeout_s,
         }
         if settings.openai_base_url:
-            # DeepSeek, Ollama y otros endpoints OpenAI-compatible.
             client_kwargs["base_url"] = settings.openai_base_url
         self._client = AsyncOpenAI(**client_kwargs)
         self._default_model = settings.llm_default_model
 
     @retry(stop=stop_after_attempt(2), wait=wait_exponential(min=0.4, max=2.0))
-    async def generate(self, messages, *, model=None, temperature=0.7, max_tokens=None) -> LLMResponse:
-        resp = await self._client.chat.completions.create(
-            model=model or self._default_model,
-            messages=[m.model_dump() for m in messages],
-            temperature=temperature,
-            max_tokens=max_tokens or get_settings().max_response_tokens,
-        )
+    async def generate(
+        self,
+        messages: list[LLMMessage],
+        *,
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        response_format: dict | None = None,
+    ) -> LLMResponse:
+        kwargs: dict = {
+            "model": model or self._default_model,
+            "messages": [m.model_dump() for m in messages],
+            "temperature": temperature,
+            "max_tokens": max_tokens or get_settings().max_response_tokens,
+        }
+        if response_format is not None:
+            kwargs["response_format"] = response_format
+
+        resp = await self._client.chat.completions.create(**kwargs)
         choice = resp.choices[0]
         usage = resp.usage
         return LLMResponse(
@@ -48,7 +59,12 @@ class OpenAIProvider:
         )
 
     async def stream(  # type: ignore[override]
-        self, messages, *, model=None, temperature=0.7, max_tokens=None
+        self,
+        messages: list[LLMMessage],
+        *,
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
     ) -> AsyncIterator[LLMChunk]:
         stream = await self._client.chat.completions.create(
             model=model or self._default_model,
@@ -74,5 +90,4 @@ class OpenAIProvider:
                 )
 
     def count_tokens(self, messages: list[LLMMessage]) -> int:
-        # Aproximación conservadora; sustituible por tiktoken en Fase 5.
         return count_messages_tokens(messages)

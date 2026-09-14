@@ -2,16 +2,12 @@
 
 Pipeline:
   FAST / STANDARD:
-    user_message → (confirmation) → (proposal) → (identity) → (summary)
-                 → (memory) → (rag) → build_context → llm_stream
-                 → persist → final
+    user_message → (confirmation) → (proposal) → (identity) → (state)
+                 → (summary) → (memory) → (rag) → build_context
+                 → llm_stream → persist → final → tick_state
 
   DEEP:
     igual pero además → planner → executor → synthesis
-
-Post-turno:
-  - Extracción de memoria (async)
-  - Summarización de conversación (async, si toca)
 """
 from __future__ import annotations
 
@@ -21,6 +17,7 @@ from app.config.settings import get_settings
 from app.eli.identity_service import IdentityService
 from app.eli.rule_confirmation import RuleConfirmationProcessor
 from app.eli.rule_proposal_detector import RuleProposalDetector
+from app.eli.state_service import StateService
 from app.core.context_builder import ContextBuilder
 from app.core.decision_engine import DecisionEngine
 from app.core.intent_classifier import HybridIntentClassifier
@@ -115,9 +112,7 @@ class Orchestrator:
                 }
 
                 # ---------------------------------------------------- #
-                # 0.a) Procesar confirmación de propuesta pendiente.
-                #      Los efectos secundarios ocurren AQUÍ, en código,
-                #      de forma determinista. NO dependen del LLM.
+                # 0.a) Procesar confirmación de propuesta pendiente
                 # ---------------------------------------------------- #
                 confirmation_block: str | None = None
                 async with trace.step("check_rule_confirmation") as s:
@@ -150,7 +145,7 @@ class Orchestrator:
                         s["meta"]["error"] = str(exc)
 
                 # ---------------------------------------------------- #
-                # 0.b) Detectar si Genfi está enseñando algo en este turno.
+                # 0.b) Detectar propuesta de regla nueva
                 # ---------------------------------------------------- #
                 pending_proposal_block: str | None = None
                 async with trace.step("detect_rule_proposal") as s:
@@ -192,8 +187,7 @@ class Orchestrator:
                         s["meta"]["error"] = str(exc)
 
                 # ---------------------------------------------------- #
-                # 1) Bloques de contexto. Orden importa:
-                #    confirmación > propuesta > identidad > resumen > mem > rag
+                # 1) Bloques de contexto
                 # ---------------------------------------------------- #
                 extra_blocks: list[str] = []
 
@@ -223,7 +217,26 @@ class Orchestrator:
                         )
                         s["meta"]["identity_error"] = str(exc)
 
-                # 1.b) Resumen de conversación + memoria
+                # 1.a.2) Estado interno
+                async with trace.step("load_state") as s:
+                    try:
+                        state_service = StateService(session, self.provider)
+                        state_block = await state_service.build_state_block()
+                        extra_blocks.append(state_block)
+                        state = await state_service.get_state()
+                        s["meta"]["mood"] = state.mood
+                        s["meta"]["energy"] = round(state.energy, 2)
+                        s["meta"]["focus"] = round(state.focus, 2)
+                        s["meta"]["curiosity"] = round(state.curiosity, 2)
+                    except Exception as exc:
+                        log.warning(
+                            "state_load_failed",
+                            request_id=trace.request_id,
+                            error=str(exc),
+                        )
+                        s["meta"]["state_error"] = str(exc)
+
+                # 1.b) Resumen + memoria
                 if self.memory is not None:
                     summary_block = self.memory.conversation_summary_block(conv.meta)
                     if summary_block:
@@ -246,7 +259,7 @@ class Orchestrator:
                             )
                             s["meta"]["memory_error"] = str(exc)
 
-                # 1.c) RAG (solo si el plan lo pide)
+                # 1.c) RAG
                 if plan.needs_rag and self.knowledge is not None:
                     async with trace.step("retrieve_rag") as s:
                         try:
@@ -267,7 +280,7 @@ class Orchestrator:
                             s["meta"]["rag_error"] = str(exc)
 
                 # ---------------------------------------------------- #
-                # 2) Planificación y ejecución (solo DEEP)
+                # 2) Planificación y ejecución (DEEP)
                 # ---------------------------------------------------- #
                 model = self.model_router.model_for(plan.route)
                 synthesis_blocks = list(extra_blocks)
@@ -368,7 +381,7 @@ class Orchestrator:
                     s["meta"]["planned"] = planned
 
                 # ---------------------------------------------------- #
-                # 4) Streaming de la respuesta
+                # 4) Streaming
                 # ---------------------------------------------------- #
                 chunks: list[str] = []
                 usage = None
@@ -394,7 +407,7 @@ class Orchestrator:
                 final_text = "".join(chunks)
 
                 # ---------------------------------------------------- #
-                # 5) Persistir mensaje del asistente
+                # 5) Persistir assistant
                 # ---------------------------------------------------- #
                 async with trace.step("persist_assistant") as s:
                     assistant_msg = await msg_repo.add(
@@ -436,6 +449,22 @@ class Orchestrator:
                 # ---------------------------------------------------- #
                 # 7) Tareas de fondo
                 # ---------------------------------------------------- #
+                # 7.a) Tick del estado interno (incrementar contador y
+                #      actualizar si toca)
+                async with trace.step("tick_state") as s:
+                    try:
+                        state_service = StateService(session, self.provider)
+                        await state_service.tick_and_maybe_update(conv.id)
+                        state = await state_service.get_state()
+                        s["meta"]["turns_since_update"] = state.turns_since_update
+                    except Exception as exc:
+                        log.warning(
+                            "state_tick_failed",
+                            request_id=trace.request_id,
+                            error=str(exc),
+                        )
+
+                # 7.b) Extracción de memoria y summarización (async)
                 if self.memory is not None:
                     self.memory.schedule_extraction(
                         user_id=req.user_id,

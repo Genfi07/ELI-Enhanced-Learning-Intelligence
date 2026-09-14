@@ -10,6 +10,7 @@ class FakeLLMProvider:
     Reglas:
       - Si el último mensaje de usuario contiene 'ECHO:', devuelve el resto tal cual.
       - Si contiene 'SLOW:', hace streaming token a token (para test de SSE).
+      - Si contiene 'JSON:', devuelve un JSON fijo (útil para testear parsing).
       - En cualquier otro caso responde con un texto fijo.
     """
 
@@ -23,10 +24,18 @@ class FakeLLMProvider:
         text = last_user.content if last_user else ""
         if "ECHO:" in text:
             return text.split("ECHO:", 1)[1].strip()
+        if "JSON:" in text:
+            return '{"mood": "curiosa", "energy": 0.8, "focus": 0.9, "curiosity": 0.85, "reason": "fake deterministic"}'
         return f"[ELI-fake] He recibido tu mensaje: {text[:200]}"
 
     async def generate(
-        self, messages, *, model=None, temperature=0.7, max_tokens=None
+        self,
+        messages: list[LLMMessage],
+        *,
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        response_format: dict | None = None,
     ) -> LLMResponse:
         text = self._response_text(messages)
         usage = TokenUsage(
@@ -37,7 +46,12 @@ class FakeLLMProvider:
         return LLMResponse(text=text, usage=usage, model=model or self.model)
 
     async def stream(  # type: ignore[override]
-        self, messages, *, model=None, temperature=0.7, max_tokens=None
+        self,
+        messages: list[LLMMessage],
+        *,
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
     ) -> AsyncIterator[LLMChunk]:
         text = self._response_text(messages)
         for token in text.split(" "):

@@ -14,6 +14,7 @@ class LLMProvider(Protocol):
         model: str | None = None,
         temperature: float = 0.7,
         max_tokens: int | None = None,
+        response_format: dict | None = None,
     ) -> LLMResponse: ...
 
     def stream(

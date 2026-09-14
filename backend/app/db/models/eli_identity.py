@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -36,10 +37,11 @@ class EliCoreIdentity(Base, UUIDPk):
         String(200), nullable=True
     )
     creator_relation: Mapped[str] = mapped_column(String(40), nullable=False)
-    # Lista de UUIDs (como strings JSONB) de las cuentas que representan
-    # a Genfi.
     father_user_ids: Mapped[list[Any]] = mapped_column(
-        JSONB, default=list, nullable=False, server_default="'[]'::jsonb"
+        JSONB,
+        default=list,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
     )
     narrative: Mapped[str] = mapped_column(Text, nullable=False)
     purpose: Mapped[str | None] = mapped_column(Text, nullable=True)
