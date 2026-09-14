@@ -3,8 +3,8 @@
 Pipeline:
   FAST / STANDARD:
     user_message → (confirmation) → (proposal) → (identity) → (state)
-                 → (summary) → (memory) → (rag) → build_context
-                 → llm_stream → persist → final → tick_state
+                 → (datetime) → (summary) → (memory) → (rag)
+                 → build_context → llm_stream → persist → final → tick_state
 
   DEEP:
     igual pero además → planner → executor → synthesis
@@ -14,6 +14,10 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 from app.config.settings import get_settings
+from app.core.datetime_context import (
+    build_datetime_block,
+    should_inject_datetime,
+)
 from app.eli.identity_service import IdentityService
 from app.eli.rule_confirmation import RuleConfirmationProcessor
 from app.eli.rule_proposal_detector import RuleProposalDetector
@@ -236,6 +240,10 @@ class Orchestrator:
                         )
                         s["meta"]["state_error"] = str(exc)
 
+                # 1.a.3) Contexto temporal (solo si la pregunta lo pide)
+                if should_inject_datetime(req.message):
+                    extra_blocks.append(build_datetime_block())
+
                 # 1.b) Resumen + memoria
                 if self.memory is not None:
                     summary_block = self.memory.conversation_summary_block(conv.meta)
@@ -449,8 +457,7 @@ class Orchestrator:
                 # ---------------------------------------------------- #
                 # 7) Tareas de fondo
                 # ---------------------------------------------------- #
-                # 7.a) Tick del estado interno (incrementar contador y
-                #      actualizar si toca)
+                # 7.a) Tick del estado interno
                 async with trace.step("tick_state") as s:
                     try:
                         state_service = StateService(session, self.provider)
