@@ -1,0 +1,209 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------ */
+/* Tema de ELI — dark, moderno, alto contraste                        */
+/* ------------------------------------------------------------------ */
+@theme {
+  /* Fondos */
+  --color-background: #0b0d11;
+  --color-surface: #111418;
+  --color-surface-hover: #171b22;
+  --color-border: #1f242c;
+  --color-border-strong: #2b323c;
+
+  /* Texto */
+  --color-foreground: #e7eaee;
+  --color-muted: #8b93a1;
+  --color-subtle: #5c6472;
+
+  /* Acento */
+  --color-primary: #4d9eff;
+  --color-primary-hover: #6cb0ff;
+  --color-primary-soft: rgba(77, 158, 255, 0.12);
+
+  /* Estados */
+  --color-success: #3fb950;
+  --color-warning: #d29922;
+  --color-danger: #f85149;
+
+  /* Tipografías */
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  /* Radios */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Reset suave + scrollbars oscuros                                   */
+/* ------------------------------------------------------------------ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #3a4148;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+  font-feature-settings: "cv11", "ss01";
+}
+
+/* ------------------------------------------------------------------ */
+/* Markdown del asistente                                             */
+/* ------------------------------------------------------------------ */
+.prose-eli {
+  line-height: 1.7;
+  color: var(--color-foreground);
+  word-wrap: break-word;
+}
+.prose-eli p {
+  margin: 0.65em 0;
+}
+.prose-eli p:first-child {
+  margin-top: 0;
+}
+.prose-eli p:last-child {
+  margin-bottom: 0;
+}
+.prose-eli h1,
+.prose-eli h2,
+.prose-eli h3 {
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 1.2em 0 0.5em;
+}
+.prose-eli h1 {
+  font-size: 1.4em;
+}
+.prose-eli h2 {
+  font-size: 1.2em;
+}
+.prose-eli h3 {
+  font-size: 1.05em;
+}
+.prose-eli ul,
+.prose-eli ol {
+  padding-left: 1.5em;
+  margin: 0.5em 0;
+}
+.prose-eli ul {
+  list-style: disc;
+}
+.prose-eli ol {
+  list-style: decimal;
+}
+.prose-eli li {
+  margin: 0.2em 0;
+}
+.prose-eli a {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.prose-eli a:hover {
+  color: var(--color-primary-hover);
+}
+.prose-eli blockquote {
+  border-left: 3px solid var(--color-border-strong);
+  padding-left: 1em;
+  color: var(--color-muted);
+  margin: 0.8em 0;
+}
+.prose-eli code:not(pre code) {
+  background: var(--color-surface-hover);
+  border: 1px solid var(--color-border);
+  padding: 0.12em 0.4em;
+  border-radius: 4px;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.9em;
+}
+.prose-eli pre {
+  background: #05070a;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 1em;
+  overflow-x: auto;
+  margin: 0.9em 0;
+}
+.prose-eli pre code {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.87em;
+  line-height: 1.55;
+  background: none;
+  border: none;
+  padding: 0;
+}
+.prose-eli table {
+  border-collapse: collapse;
+  margin: 0.9em 0;
+  font-size: 0.92em;
+}
+.prose-eli th,
+.prose-eli td {
+  border: 1px solid var(--color-border);
+  padding: 0.5em 0.8em;
+  text-align: left;
+}
+.prose-eli th {
+  background: var(--color-surface-hover);
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------------ */
+/* Animaciones sutiles                                                */
+/* ------------------------------------------------------------------ */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+@keyframes blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  51%,
+  100% {
+    opacity: 0;
+  }
+}
+.cursor-blink {
+  display: inline-block;
+  width: 8px;
+  height: 1.1em;
+  background: var(--color-primary);
+  vertical-align: text-bottom;
+  animation: blink 1s step-end infinite;
+  border-radius: 1px;
+}
