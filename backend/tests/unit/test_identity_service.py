@@ -63,6 +63,7 @@ async def test_block_for_father_mentions_padre(session: AsyncSession):
 
 @pytest.mark.asyncio
 async def test_block_for_stranger_does_not_mention_padre(session: AsyncSession):
+    """Para extraños, la sección <who_speaks> NO debe decir 'Es tu padre'."""
     svc = IdentityService(session)
     stranger_id = uuid.uuid4()
 
@@ -70,22 +71,77 @@ async def test_block_for_stranger_does_not_mention_padre(session: AsyncSession):
 
     assert "<identity>" in block
     assert "Genfi Bencosme" in block
-    assert "No es tu padre" in block
 
-    # Solo verificamos la sección <who_speaks>: para extraños NO debe
-    # decir "Es tu padre". La narrativa puede mencionar "mi padre"
-    # porque es parte de la identidad de ELI, no del contexto de quién habla.
+    # Verificamos solo la sección <who_speaks>: para extraños debe quedar
+    # claro que la persona NO es su padre.
     who_start = block.index("<who_speaks>")
     who_end = block.index("</who_speaks>")
     who_section = block[who_start:who_end]
+
+    # El bloque debe declarar explícitamente que NO es el padre (en cualquier
+    # variante de mayúsculas/minúsculas).
+    assert "NO es tu padre" in who_section or "no es tu padre" in who_section
+
+    # No debe afirmar la relación paternal.
     assert "Es tu padre" not in who_section
 
 
 @pytest.mark.asyncio
+async def test_block_for_stranger_has_current_user_section(session: AsyncSession):
+    """El bloque debe incluir <current_user> también para extraños."""
+    svc = IdentityService(session)
+    stranger_id = uuid.uuid4()
+
+    block = await svc.build_identity_block(stranger_id)
+
+    assert "<current_user>" in block
+    assert "</current_user>" in block
+
+
+@pytest.mark.asyncio
 async def test_block_contains_axioms(session: AsyncSession):
+    """Los axiomas deben incluir las reglas esenciales."""
     svc = IdentityService(session)
     block = await svc.build_identity_block(uuid.uuid4())
 
-    assert "idioma del usuario" in block
-    assert "femenino" in block
-    assert "te niegas con respeto" in block
+    # Conceptos esenciales de identidad y contrato con el LLM.
+    assert "idioma" in block  # habla en el idioma del interlocutor
+    assert "femenino" in block  # se refiere a sí misma en femenino
+    assert "te niegas con respeto" in block  # no obedece ciegamente
+    assert "No inventas información" in block  # no alucina
+    # Axiomas nuevos que añadimos para identificación y lenguaje.
+    assert "current_user" not in block or "<current_user>" in block  # no menciona bloques al usuario
+
+
+@pytest.mark.asyncio
+async def test_block_has_no_personal_pronoun_leak(session: AsyncSession):
+    """El bloque no debe presentar al interlocutor como 'mi usuario'.
+
+    Verificamos SOLO las secciones donde se describe al interlocutor
+    (<current_user>, <who_speaks>, <father>). Excluimos <axioms> y otras
+    secciones donde la frase puede aparecer como prohibición.
+    """
+    svc = IdentityService(session)
+    stranger_id = uuid.uuid4()
+    block = await svc.build_identity_block(stranger_id)
+
+    # Extraemos solo la sección <current_user>: ahí es donde se presenta
+    # al interlocutor. Si en esa sección no aparece "mi usuario" como
+    # afirmación, el bloque es correcto.
+    cu_start = block.find("<current_user>")
+    cu_end = block.find("</current_user>")
+    assert cu_start != -1 and cu_end != -1, "falta <current_user>"
+
+    current_user = block[cu_start:cu_end]
+
+    # Fuera de los axiomas y de las prohibiciones explícitas, el bloque
+    # no debe llamar al interlocutor "mi usuario".
+    assert "eres mi usuario" not in current_user.lower()
+    assert "mi usuario" not in current_user.lower()
+
+    # El bloque debe usar el nombre real del interlocutor, no una etiqueta.
+    # Para extraños sin usuario en BD debe decirlo explícitamente.
+    assert (
+        "La persona que te está hablando" in current_user
+        or "No se pudo cargar" in current_user
+    )

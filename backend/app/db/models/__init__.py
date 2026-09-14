@@ -16,6 +16,7 @@ from app.db.models.eli_identity import (
     EliValue,
 )
 from app.db.models.eli_state import EliState, EliStateHistory
+from app.db.models.eli_goal import EliGoal
 
 __all__ = [
     "Permission",
@@ -42,4 +43,5 @@ __all__ = [
     "EliRuleProposal",
     "EliState",
     "EliStateHistory",
+    "EliGoal",
 ]
