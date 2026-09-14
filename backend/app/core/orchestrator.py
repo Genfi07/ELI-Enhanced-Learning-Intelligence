@@ -3,7 +3,7 @@
 Pipeline:
   FAST / STANDARD:
     user_message → (confirmation) → (proposal) → (identity) → (state)
-                 → (datetime) → (summary) → (memory) → (rag)
+                 → (datetime) → (web_search) → (summary) → (memory) → (rag)
                  → build_context → llm_stream → persist → final → tick_state
 
   DEEP:
@@ -17,6 +17,11 @@ from app.config.settings import get_settings
 from app.core.datetime_context import (
     build_datetime_block,
     should_inject_datetime,
+)
+from app.core.web_search_trigger import (
+    extract_search_query,
+    format_search_results,
+    should_search_web,
 )
 from app.eli.identity_service import IdentityService
 from app.eli.rule_confirmation import RuleConfirmationProcessor
@@ -243,6 +248,56 @@ class Orchestrator:
                 # 1.a.3) Contexto temporal (solo si la pregunta lo pide)
                 if should_inject_datetime(req.message):
                     extra_blocks.append(build_datetime_block())
+
+                # 1.a.4) Búsqueda web (solo si la pregunta lo pide)
+                if should_search_web(req.message):
+                    async with trace.step("web_search") as s:
+                        try:
+                            query = extract_search_query(req.message)
+                            s["meta"]["query"] = query
+
+                            runtime = (
+                                self.executor.tool_runtime
+                                if self.executor is not None
+                                else None
+                            )
+                            if runtime is None or user is None:
+                                s["meta"]["skipped"] = "sin runtime o user"
+                            else:
+                                from app.tools.runtime import ToolInvocationContext
+                                ctx = ToolInvocationContext(
+                                    user_id=req.user_id,
+                                    conversation_id=conv.id,
+                                    message_id=user_msg.id,
+                                )
+                                result = await runtime.invoke(
+                                    session,
+                                    user=user,
+                                    tool_name="web_search",
+                                    arguments={"query": query, "max_results": 5},
+                                    context=ctx,
+                                )
+                                s["meta"]["status"] = result.status
+                                s["meta"]["latency_ms"] = result.latency_ms
+
+                                if result.status == "OK":
+                                    block = format_search_results(result.result)
+                                    extra_blocks.append(block)
+                                    s["meta"]["results"] = (
+                                        result.result or {}
+                                    ).get("count", 0)
+                                else:
+                                    block = format_search_results(
+                                        None, error=result.error or result.status
+                                    )
+                                    extra_blocks.append(block)
+                        except Exception as exc:
+                            log.warning(
+                                "web_search_failed",
+                                request_id=trace.request_id,
+                                error=str(exc),
+                            )
+                            s["meta"]["error"] = str(exc)
 
                 # 1.b) Resumen + memoria
                 if self.memory is not None:

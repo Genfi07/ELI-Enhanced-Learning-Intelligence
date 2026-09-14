@@ -92,7 +92,7 @@ class WebSearchTool:
             "query": query,
             "max_results": max_results,
             "search_depth": "basic",
-            "include_answer": False,
+            "include_answer": True,
             "include_raw_content": False,
         }
 
@@ -138,5 +138,6 @@ class WebSearchTool:
         return {
             "query": query,
             "count": len(results),
+            "answer": payload.get("answer") or "",
             "results": results,
         }
