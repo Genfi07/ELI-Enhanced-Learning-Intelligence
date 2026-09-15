@@ -5,8 +5,7 @@ Ciclo de vida efímero:
     hidden_at IS NULL.
   - Los documentos "eliminados" tienen deleted_at pero no hidden_at.
     Ya no aparecen en búsquedas (sus chunks fueron borrados).
-  - Los documentos "ocultos" tienen hidden_at. No aparecen en ninguna
-    consulta normal. ELI sigue sabiendo que existieron (summary + topics).
+  - Los documentos "ocultos" tienen hidden_at.
 """
 from __future__ import annotations
 
@@ -87,7 +86,6 @@ class KnowledgeStore:
         status: str | None = None,
         limit: int = 100,
     ) -> list[Document]:
-        """Lista documentos NO ocultos (activos + eliminados)."""
         stmt = select(Document).where(
             Document.owner_user_id == user_id,
             Document.hidden_at.is_(None),
@@ -104,12 +102,6 @@ class KnowledgeStore:
         state: str = "active",
         limit: int = 100,
     ) -> list[Document]:
-        """Lista documentos por estado visible.
-
-        - active:  no eliminados, no ocultos.
-        - deleted: eliminados pero no ocultos.
-        - all:     no ocultos (activos + eliminados).
-        """
         base = select(Document).where(Document.owner_user_id == user_id)
 
         if state == "active":
@@ -125,7 +117,6 @@ class KnowledgeStore:
         elif state == "all":
             base = base.where(Document.hidden_at.is_(None))
         else:
-            # Fallback seguro: activos
             base = base.where(
                 Document.deleted_at.is_(None),
                 Document.hidden_at.is_(None),
@@ -162,7 +153,6 @@ class KnowledgeStore:
     async def delete_document(
         self, user_id: uuid.UUID, document_id: uuid.UUID
     ) -> Document | None:
-        """Borra el documento y devuelve el modelo (para poder borrar el archivo)."""
         doc = await self.get_document(user_id, document_id)
         if doc is None:
             return None
@@ -172,18 +162,10 @@ class KnowledgeStore:
     async def soft_delete_document(
         self, user_id: uuid.UUID, document_id: uuid.UUID
     ) -> Document | None:
-        """Marca el documento como eliminado y borra sus chunks + embeddings.
-
-        El documento sigue visible en la UI (tachado) hasta que el usuario
-        llame a `hide_document`.
-        """
         doc = await self.get_document(user_id, document_id)
         if doc is None:
             return None
-
-        # Borrar chunks (con embeddings por cascade de DELETE).
         await self.delete_chunks_for_document(document_id)
-
         doc.deleted_at = datetime.now(timezone.utc)
         doc.chunk_count = 0
         await self.session.flush()
@@ -192,7 +174,6 @@ class KnowledgeStore:
     async def hide_document(
         self, user_id: uuid.UUID, document_id: uuid.UUID
     ) -> Document | None:
-        """Oculta la entrada del documento. ELI sigue sabiéndolo por summary."""
         doc = await self.get_document(user_id, document_id)
         if doc is None:
             return None
@@ -201,7 +182,6 @@ class KnowledgeStore:
         return doc
 
     async def mark_physical_deleted(self, document_id: uuid.UUID) -> None:
-        """Registra cuándo se borró el archivo físico (auditoría)."""
         doc = await self.session.get(Document, document_id)
         if doc is None:
             return
@@ -230,10 +210,6 @@ class KnowledgeStore:
         document_id: uuid.UUID,
         chunks: list[dict],
     ) -> int:
-        """Inserta chunks ya resueltos.
-
-        Cada dict debe tener: chunk_index, content, token_count, meta, embedding.
-        """
         if not chunks:
             return 0
         models = [
@@ -256,6 +232,64 @@ class KnowledgeStore:
         result = await self.session.execute(stmt)
         return result.rowcount or 0
 
+    async def get_chunks_for_documents(
+        self,
+        user_id: uuid.UUID,
+        document_ids: list[uuid.UUID],
+        *,
+        limit_per_doc: int = 20,
+    ) -> list[RetrievedChunk]:
+        """Devuelve los primeros N chunks de cada documento adjunto.
+
+        Usado cuando el usuario adjunta un documento al chat SIN preguntar
+        algo específico. Devolvemos el contenido completo del documento
+        (hasta `limit_per_doc` chunks por doc) para que ELI lo tenga todo
+        disponible.
+
+        Solo devuelve documentos activos (READY, no eliminados, no ocultos).
+        """
+        if not document_ids:
+            return []
+
+        # Filtro de seguridad: solo los documentos del usuario que estén activos.
+        docs_stmt = select(Document).where(
+            Document.id.in_(document_ids),
+            Document.owner_user_id == user_id,
+            Document.status == "READY",
+            Document.deleted_at.is_(None),
+            Document.hidden_at.is_(None),
+        )
+        docs = list((await self.session.scalars(docs_stmt)).all())
+        if not docs:
+            return []
+
+        valid_ids = [d.id for d in docs]
+        doc_by_id = {d.id: d for d in docs}
+
+        results: list[RetrievedChunk] = []
+        for doc_id in valid_ids:
+            chunks_stmt = (
+                select(DocumentChunk)
+                .where(DocumentChunk.document_id == doc_id)
+                .order_by(DocumentChunk.chunk_index.asc())
+                .limit(limit_per_doc)
+            )
+            chunks = list((await self.session.scalars(chunks_stmt)).all())
+            doc = doc_by_id[doc_id]
+            for c in chunks:
+                results.append(
+                    RetrievedChunk(
+                        chunk_id=c.id,
+                        document_id=c.document_id,
+                        document_title=doc.title,
+                        content=c.content,
+                        score=1.0,
+                        similarity=1.0,
+                        meta=c.meta or {},
+                    )
+                )
+        return results
+
     # ------------------------------------------------------------------ #
     # Búsqueda híbrida
     # ------------------------------------------------------------------ #
@@ -267,20 +301,34 @@ class KnowledgeStore:
         top_k: int = 6,
         candidate_pool: int = 30,
         org_id: uuid.UUID | None = None,
+        document_ids: list[uuid.UUID] | None = None,
     ) -> list[RetrievedChunk]:
+        """Búsqueda híbrida sobre documentos activos.
+
+        Si `document_ids` está definido, restringe la búsqueda SOLO a esos
+        documentos. Útil para búsquedas dentro de adjuntos específicos.
+        """
         if not query.strip():
             return []
 
         query_vector = await self.embeddings.embed(query)
 
         vector_hits = await self._vector_search(
-            user_id, query_vector, limit=candidate_pool, org_id=org_id
+            user_id,
+            query_vector,
+            limit=candidate_pool,
+            org_id=org_id,
+            document_ids=document_ids,
         )
         similarity_by_id: dict[uuid.UUID, float] = {cid: sim for cid, sim in vector_hits}
         vector_ids = [cid for cid, _ in vector_hits]
 
         keyword_ids = await self._keyword_search(
-            user_id, query, limit=candidate_pool, org_id=org_id
+            user_id,
+            query,
+            limit=candidate_pool,
+            org_id=org_id,
+            document_ids=document_ids,
         )
 
         rrf: dict[uuid.UUID, float] = {}
@@ -338,9 +386,16 @@ class KnowledgeStore:
         *,
         limit: int,
         org_id: uuid.UUID | None,
+        document_ids: list[uuid.UUID] | None = None,
     ) -> list[tuple[uuid.UUID, float]]:
         scope_sql, params = _scope_filter(user_id, org_id)
-        # Solo documentos activos: READY, no eliminados, no ocultos.
+
+        # Filtro adicional: solo a documentos específicos (si se pasa).
+        doc_filter_sql = ""
+        if document_ids:
+            doc_ids_str = ",".join(f"'{str(d)}'" for d in document_ids)
+            doc_filter_sql = f"AND d.id IN ({doc_ids_str})"
+
         stmt = text(
             f"""
             SELECT dc.id, 1 - (dc.embedding <=> CAST(:vec AS vector)) AS sim
@@ -350,6 +405,7 @@ class KnowledgeStore:
               AND d.status = 'READY'
               AND d.deleted_at IS NULL
               AND d.hidden_at IS NULL
+              {doc_filter_sql}
               AND ({scope_sql})
             ORDER BY dc.embedding <=> CAST(:vec AS vector)
             LIMIT :lim
@@ -367,9 +423,15 @@ class KnowledgeStore:
         *,
         limit: int,
         org_id: uuid.UUID | None,
+        document_ids: list[uuid.UUID] | None = None,
     ) -> list[uuid.UUID]:
         scope_sql, params = _scope_filter(user_id, org_id)
-        # Solo documentos activos: READY, no eliminados, no ocultos.
+
+        doc_filter_sql = ""
+        if document_ids:
+            doc_ids_str = ",".join(f"'{str(d)}'" for d in document_ids)
+            doc_filter_sql = f"AND d.id IN ({doc_ids_str})"
+
         stmt = text(
             f"""
             SELECT dc.id
@@ -378,6 +440,7 @@ class KnowledgeStore:
             WHERE d.status = 'READY'
               AND d.deleted_at IS NULL
               AND d.hidden_at IS NULL
+              {doc_filter_sql}
               AND ({scope_sql})
               AND to_tsvector('spanish', dc.content) @@
                   plainto_tsquery('spanish', :q)
@@ -393,9 +456,6 @@ class KnowledgeStore:
         return [row[0] for row in rows.all()]
 
 
-# --------------------------------------------------------------------------- #
-# Helpers
-# --------------------------------------------------------------------------- #
 def _scope_filter(user_id: uuid.UUID, org_id: uuid.UUID | None) -> tuple[str, dict]:
     parts = ["(d.scope = 'USER' AND d.owner_user_id = :uid)"]
     params: dict = {"uid": str(user_id)}

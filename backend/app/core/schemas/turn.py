@@ -1,7 +1,7 @@
 import uuid
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.schemas.plan import ProcessingPlan
 
@@ -10,6 +10,10 @@ class TurnRequest(BaseModel):
     user_id: uuid.UUID
     conversation_id: uuid.UUID
     message: str
+    # Documentos adjuntos explícitamente por el usuario en este turno.
+    # El orquestador carga sus chunks como bloque <attached_documents>
+    # prioritario (separado del RAG normal).
+    attached_document_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 class TurnResult(BaseModel):

@@ -58,10 +58,47 @@ class Settings(BaseSettings):
     # Ollama chat (local)
     ollama_chat_model: str = "qwen2.5:3b"
 
-    # Embeddings
-    embeddings_provider: Literal["openai", "ollama", "fake"] = "fake"
+      # Proveedor de embeddings. Opciones:
+    #   "chain"  → Gemini → Jina → Ollama (recomendado, rotación automática)
+    #   "gemini" → solo Gemini
+    #   "jina"   → solo Jina
+    #   "ollama" → solo Ollama local
+    #   "openai" → solo OpenAI real
+    #   "fake"   → hash determinista (dev/test)
+    embeddings_provider: Literal[
+        "chain", "gemini", "jina", "ollama", "openai", "fake"
+    ] = "fake"
+
+    # Ollama (embeddings locales)
     ollama_base_url: str = "http://localhost:11434"
     ollama_embeddings_model: str = "nomic-embed-text"
+
+    # Gemini (embeddings en la nube, gratis hasta 1K req/día)
+    gemini_api_key: str | None = None
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    gemini_embeddings_model: str = "gemini-embedding-2"
+
+    # Jina AI (10M tokens únicos gratis, sin caducidad)
+    jina_api_key: str | None = None
+    jina_model: str = "jina-embeddings-v3"
+
+    # Mistral (embeddings, ~1B tokens/mes gratis)
+    mistral_api_key: str | None = None
+
+    # Voyage AI (200M tokens únicos gratis)
+    voyage_api_key: str | None = None
+
+    # Cohere (1.000 llamadas/mes gratis)
+    cohere_api_key: str | None = None
+
+    # Ollama (embeddings locales)
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_embeddings_model: str = "nomic-embed-text"
+
+    # Gemini (embeddings en la nube, gratis)
+    gemini_api_key: str | None = None
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    gemini_embeddings_model: str = "gemini-embedding-2"
 
     # Context / budgets (v1)
     max_context_tokens: int = 16_000

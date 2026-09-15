@@ -2,12 +2,27 @@
 
 Pipeline:
   FAST / STANDARD:
-    user_message → (confirmation) → (proposal) → (identity) → (state)
-                 → (datetime) → (web_search) → (summary) → (memory) → (rag)
-                 → build_context → llm_stream → persist → final → tick_state
+    user_message → (confirmation) → (proposal) → (taught_goal)
+                 → (identity) → (state) → (datetime) → (goals)
+                 → (attached_documents) → (web_search)
+                 → (summary) → (memory) → (rag)
+                 → build_context → llm_stream → persist → final
+                 → tick_state → goal_detector → memory_extraction
 
   DEEP:
     igual pero además → planner → executor → synthesis
+
+Orden de bloques del system prompt (de más a menos prioritario):
+  1. confirmation_block    (respuesta a una confirmación del usuario)
+  2. pending_proposal_block (pedir confirmación de una regla)
+  3. identity              (núcleo inmutable + axioms + reglas)
+  4. state                 (ánimo, energía, foco, curiosidad)
+  5. current_datetime      (solo si la pregunta es de hora/fecha)
+  6. goals                 (metas activas de ELI)
+  7. attached_documents    (docs adjuntos por el usuario) ← ALTA PRIORIDAD
+  8. web_search_results    (solo si la pregunta requiere actualidad)
+  9. summary + memory      (resumen de conversación + memorias del usuario)
+ 10. documents (RAG)       (búsqueda general sobre todos los docs activos)
 """
 from __future__ import annotations
 
@@ -89,6 +104,7 @@ class Orchestrator:
         )
         memory_used = 0
         rag_used = 0
+        attached_chunks_used = 0
         planned = False
         plan_steps = 0
         plan_status: str | None = None
@@ -112,6 +128,7 @@ class Orchestrator:
                     )
                     user_msg = await msg_repo.add(conv.id, "user", req.message)
                     s["meta"]["history_size"] = len(history)
+                    s["meta"]["attached_docs"] = len(req.attached_document_ids)
 
                 user = await session.get(User, req.user_id)
 
@@ -124,7 +141,7 @@ class Orchestrator:
                 }
 
                 # ---------------------------------------------------- #
-                # 0.a) Procesar confirmación de propuesta pendiente
+                # 0.a) Confirmación de propuesta pendiente
                 # ---------------------------------------------------- #
                 confirmation_block: str | None = None
                 async with trace.step("check_rule_confirmation") as s:
@@ -159,37 +176,6 @@ class Orchestrator:
                 # ---------------------------------------------------- #
                 # 0.b) Detectar propuesta de regla nueva
                 # ---------------------------------------------------- #
-        
-                # ---------------------------------------------------- #
-                # 0.c) Detectar meta enseñada explícitamente
-                #      ("aprende sobre X", "quiero que explores Y")
-                # ---------------------------------------------------- #
-                async with trace.step("detect_taught_goal") as s:
-                    try:
-                        taught_detector = TaughtGoalDetector(session, self.provider)
-                        taught_goal = await taught_detector.maybe_create_taught_goal(
-                            user_id=req.user_id,
-                            conversation_id=conv.id,
-                            message=req.message,
-                        )
-                        if taught_goal is not None:
-                            s["meta"]["goal_id"] = str(taught_goal.id)
-                            s["meta"]["kind"] = taught_goal.kind
-                            yield {
-                                "type": "goal_created",
-                                "goal_id": str(taught_goal.id),
-                                "kind": taught_goal.kind,
-                                "content": taught_goal.content,
-                                "origin": "TAUGHT",
-                            }
-                    except Exception as exc:
-                        log.warning(
-                            "taught_goal_detection_failed",
-                            request_id=trace.request_id,
-                            error=str(exc),
-                        )
-                        s["meta"]["error"] = str(exc)
-
                 pending_proposal_block: str | None = None
                 async with trace.step("detect_rule_proposal") as s:
                     try:
@@ -230,13 +216,42 @@ class Orchestrator:
                         s["meta"]["error"] = str(exc)
 
                 # ---------------------------------------------------- #
-                # 1) Bloques de contexto
+                # 0.c) Detectar meta enseñada explícitamente
+                # ---------------------------------------------------- #
+                async with trace.step("detect_taught_goal") as s:
+                    try:
+                        taught_detector = TaughtGoalDetector(session, self.provider)
+                        taught_goal = await taught_detector.maybe_create_taught_goal(
+                            user_id=req.user_id,
+                            conversation_id=conv.id,
+                            message=req.message,
+                        )
+                        if taught_goal is not None:
+                            s["meta"]["goal_id"] = str(taught_goal.id)
+                            s["meta"]["kind"] = taught_goal.kind
+                            yield {
+                                "type": "goal_created",
+                                "goal_id": str(taught_goal.id),
+                                "kind": taught_goal.kind,
+                                "content": taught_goal.content,
+                                "origin": "TAUGHT",
+                            }
+                    except Exception as exc:
+                        log.warning(
+                            "taught_goal_detection_failed",
+                            request_id=trace.request_id,
+                            error=str(exc),
+                        )
+                        s["meta"]["error"] = str(exc)
+
+                # ---------------------------------------------------- #
+                # 1) Bloques de contexto (en orden de prioridad)
                 # ---------------------------------------------------- #
                 extra_blocks: list[str] = []
 
+                # 1.0) Bloques de alta prioridad (respuesta inmediata)
                 if confirmation_block:
                     extra_blocks.append(confirmation_block)
-
                 if pending_proposal_block:
                     extra_blocks.append(pending_proposal_block)
 
@@ -260,7 +275,7 @@ class Orchestrator:
                         )
                         s["meta"]["identity_error"] = str(exc)
 
-                # 1.a.2) Estado interno
+                # 1.b) Estado interno
                 async with trace.step("load_state") as s:
                     try:
                         state_service = StateService(session, self.provider)
@@ -279,11 +294,11 @@ class Orchestrator:
                         )
                         s["meta"]["state_error"] = str(exc)
 
-                # 1.a.3) Contexto temporal (solo si la pregunta lo pide)
+                # 1.c) Contexto temporal (solo si la pregunta lo pide)
                 if should_inject_datetime(req.message):
                     extra_blocks.append(build_datetime_block())
 
-                # 1.a.4) Metas propias de ELI
+                # 1.d) Metas propias de ELI
                 async with trace.step("load_goals") as s:
                     try:
                         goal_service = GoalService(session)
@@ -299,7 +314,35 @@ class Orchestrator:
                             error=str(exc),
                         )
                         s["meta"]["goals_error"] = str(exc)
-                # 1.a.4) Búsqueda web (solo si la pregunta lo pide)
+
+                # 1.e) Documentos adjuntos explícitamente (ALTA PRIORIDAD)
+                if req.attached_document_ids and self.knowledge is not None:
+                    async with trace.step("load_attached_documents") as s:
+                        try:
+                            attached_ctx = (
+                                await self.knowledge.retrieve_attached_context(
+                                    session,
+                                    req.user_id,
+                                    req.attached_document_ids,
+                                    query=req.message,
+                                )
+                            )
+                            if attached_ctx is not None:
+                                extra_blocks.append(attached_ctx.text)
+                                attached_chunks_used = len(attached_ctx.chunk_ids)
+                                s["meta"]["chunks"] = attached_chunks_used
+                                s["meta"]["docs"] = attached_ctx.document_titles
+                            else:
+                                s["meta"]["no_content"] = True
+                        except Exception as exc:
+                            log.warning(
+                                "attached_documents_load_failed",
+                                request_id=trace.request_id,
+                                error=str(exc),
+                            )
+                            s["meta"]["error"] = str(exc)
+
+                # 1.f) Búsqueda web (solo si la pregunta lo pide)
                 if should_search_web(req.message):
                     async with trace.step("web_search") as s:
                         try:
@@ -349,7 +392,7 @@ class Orchestrator:
                             )
                             s["meta"]["error"] = str(exc)
 
-                # 1.b) Resumen + memoria
+                # 1.g) Resumen de conversación + memoria
                 if self.memory is not None:
                     summary_block = self.memory.conversation_summary_block(conv.meta)
                     if summary_block:
@@ -372,7 +415,7 @@ class Orchestrator:
                             )
                             s["meta"]["memory_error"] = str(exc)
 
-                # 1.c) RAG
+                # 1.h) RAG general (solo si el plan lo pide)
                 if plan.needs_rag and self.knowledge is not None:
                     async with trace.step("retrieve_rag") as s:
                         try:
@@ -552,6 +595,7 @@ class Orchestrator:
                     },
                     "memory_used": memory_used,
                     "rag_used": rag_used,
+                    "attached_chunks_used": attached_chunks_used,
                 }
                 if planned:
                     final_event["planned"] = True
@@ -560,9 +604,9 @@ class Orchestrator:
                 yield final_event
 
                 # ---------------------------------------------------- #
-                # 7) Tareas de fondo
+                # 7) Tareas de fondo (async, no bloquean la respuesta)
                 # ---------------------------------------------------- #
-                                # 7.a) Tick del estado interno
+                # 7.a) Tick del estado interno
                 async with trace.step("tick_state") as s:
                     try:
                         state_service = StateService(session, self.provider)
@@ -576,7 +620,7 @@ class Orchestrator:
                             error=str(exc),
                         )
 
-                # 7.a.2) Detector de metas propias (cada 10 turnos o mensaje largo)
+                # 7.b) Detector de metas propias (cada 10 turnos o mensaje largo)
                 async with trace.step("maybe_detect_goal") as s:
                     try:
                         meta = dict(conv.meta or {})
@@ -604,20 +648,7 @@ class Orchestrator:
                         )
                         s["meta"]["error"] = str(exc)
 
-                # 7.b) Extracción de memoria y summarización (async)
-                if self.memory is not None:
-                    self.memory.schedule_extraction(
-                        user_id=req.user_id,
-                        conversation_id=conv.id,
-                        user_message=req.message,
-                        assistant_message=final_text,
-                    )
-                    self.memory.schedule_summarization(
-                        user_id=req.user_id,
-                        conversation_id=conv.id,
-                    )
-
-                # 7.b) Extracción de memoria y summarización (async)
+                # 7.c) Extracción de memoria y summarización
                 if self.memory is not None:
                     self.memory.schedule_extraction(
                         user_id=req.user_id,

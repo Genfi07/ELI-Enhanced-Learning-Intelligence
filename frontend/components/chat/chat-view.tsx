@@ -4,8 +4,8 @@ import { useEffect, useRef } from "react";
 import { AlertCircle, Sparkles } from "lucide-react";
 import { MessageBubble } from "./message-bubble";
 import { ChatInput } from "./chat-input";
+import { useAttachment } from "@/lib/hooks/use-attachment";
 import type { useChat } from "@/lib/hooks/use-chat";
-import { cn } from "@/lib/utils";
 
 interface ChatViewProps {
   chat: ReturnType<typeof useChat>;
@@ -15,13 +15,28 @@ interface ChatViewProps {
 export function ChatView({ chat, title }: ChatViewProps) {
   const { state, send, cancelStream } = chat;
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { attachment, attach, clear } = useAttachment();
 
-  // Auto-scroll al final cuando llegan mensajes o tokens.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   }, [state.messages]);
+
+  function handleSend(text: string) {
+    const attachedIds =
+      attachment?.status === "ready" && attachment.docId
+        ? [attachment.docId]
+        : [];
+
+    send(text, attachedIds);
+
+    // Limpiamos el chip tras enviar. El archivo sigue vivo en /files
+    // para que el usuario lo pueda ver y gestionar.
+    if (attachedIds.length > 0) {
+      clear();
+    }
+  }
 
   const isEmpty = state.messages.length === 0;
 
@@ -57,8 +72,11 @@ export function ChatView({ chat, title }: ChatViewProps) {
       )}
 
       <ChatInput
-        onSend={send}
+        onSend={handleSend}
         onCancel={cancelStream}
+        onAttach={attach}
+        onRemoveAttachment={clear}
+        attachment={attachment}
         streaming={state.streaming}
         placeholder={
           title ? `Continúa la conversación…` : "Pregúntale algo a ELI…"
@@ -80,9 +98,10 @@ function EmptyState() {
           ELI recuerda lo que le cuentas, lee tus documentos, planifica tareas
           complejas y usa herramientas cuando hace falta.
         </p>
+        <p className="mt-3 text-xs text-[var(--color-subtle)]">
+          Puedes adjuntar un PDF, Word, Excel o imagen con el clip 📎
+        </p>
       </div>
     </div>
   );
 }
-
-void cn;

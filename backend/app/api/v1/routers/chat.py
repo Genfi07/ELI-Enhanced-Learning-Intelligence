@@ -3,7 +3,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_user_id, db_session
@@ -38,6 +38,9 @@ _orchestrator = Orchestrator(
 class ChatIn(BaseModel):
     conversation_id: uuid.UUID | None = None
     message: str
+    # Documentos adjuntos explícitamente al mensaje. Deben ser del usuario
+    # y estar en estado READY (activos, no eliminados, no ocultos).
+    attached_document_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 def _sse(event: dict) -> str:
@@ -51,12 +54,21 @@ async def chat(
     session: AsyncSession = Depends(db_session),
 ) -> StreamingResponse:
     message = body.message.strip()
-    if not message:
+    # Permitimos mensaje vacío si hay adjuntos (el usuario solo quiere
+    # que ELI lea el documento).
+    if not message and not body.attached_document_ids:
         raise HTTPException(status_code=400, detail="Mensaje vacío")
+
+    # Si hay adjuntos pero mensaje vacío, ponemos un mensaje por defecto
+    # que invite a ELI a comentar el contenido.
+    if not message and body.attached_document_ids:
+        message = "He adjuntado un documento. Léelo y dime de qué trata."
 
     conv_id = body.conversation_id
     if conv_id is None:
-        conv = await ConversationRepository(session).create(user_id, title=message[:60])
+        conv = await ConversationRepository(session).create(
+            user_id, title=message[:60]
+        )
         await session.commit()
         conv_id = conv.id
     else:
@@ -64,7 +76,12 @@ async def chat(
         if conv is None:
             raise HTTPException(status_code=404, detail="Conversación no encontrada")
 
-    req = TurnRequest(user_id=user_id, conversation_id=conv_id, message=message)
+    req = TurnRequest(
+        user_id=user_id,
+        conversation_id=conv_id,
+        message=message,
+        attached_document_ids=body.attached_document_ids,
+    )
 
     async def event_source():
         try:
