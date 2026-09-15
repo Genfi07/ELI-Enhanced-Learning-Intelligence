@@ -8,6 +8,7 @@ from app.api.v1.routers import (
     chat,
     conversations,
     files,
+    goals,
     health,
     memory,
     tools,
@@ -21,6 +22,7 @@ api_router.include_router(chat.router)
 api_router.include_router(memory.router)
 api_router.include_router(files.router)
 api_router.include_router(tools.router)
+api_router.include_router(goals.router)
 api_router.include_router(admin.router)
 api_router.include_router(admin_dashboard_router)
 api_router.include_router(admin_login_router)

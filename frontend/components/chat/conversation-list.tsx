@@ -10,6 +10,7 @@ import {
   useDeleteConversation,
 } from "@/lib/hooks/use-conversations";
 import { useNewChatStore } from "@/lib/stores/new-chat-store";
+import { useConfirm } from "@/lib/stores/confirm-store";
 
 export function ConversationList() {
   const pathname = usePathname();
@@ -18,6 +19,7 @@ export function ConversationList() {
   const { data: conversations, isLoading } = useConversations();
   const deleteMutation = useDeleteConversation();
   const [search, setSearch] = useState("");
+  const confirm = useConfirm();
 
   const filtered = (conversations ?? []).filter((c) =>
     search.trim()
@@ -25,10 +27,17 @@ export function ConversationList() {
       : true,
   );
 
-  function handleDelete(e: React.MouseEvent, id: string) {
+  async function handleDelete(e: React.MouseEvent, id: string) {
     e.preventDefault();
     e.stopPropagation();
-    if (!confirm("¿Eliminar esta conversación?")) return;
+    const ok = await confirm({
+      title: "Eliminar conversación",
+      message: "Se borrará el historial de esta conversación. Las memorias creadas se conservan.",
+      confirmText: "Eliminar",
+      cancelText: "Cancelar",
+      variant: "danger",
+    });
+    if (!ok) return;
     deleteMutation.mutate(id, {
       onSuccess: () => {
         if (pathname === `/chat/${id}`) {

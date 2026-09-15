@@ -10,6 +10,7 @@ import {
   Settings,
   ShieldCheck,
   Plus,
+  Target,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { User } from "@/lib/api/types";
@@ -30,6 +31,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/memory", label: "Memoria", icon: Brain },
+  { href: "/goals", label: "Metas", icon: Target },
   { href: "/files", label: "Archivos", icon: FileText },
   { href: "/tools", label: "Herramientas", icon: Wrench },
   { href: "/admin", label: "Admin", icon: ShieldCheck, adminOnly: true },

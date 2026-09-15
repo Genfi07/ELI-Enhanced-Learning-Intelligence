@@ -9,6 +9,7 @@ import {
   useDeleteMemory,
   useUpdateMemory,
 } from "@/lib/hooks/use-memory";
+import { useConfirm } from "@/lib/stores/confirm-store";
 
 interface MemoryCardProps {
   memory: Memory;
@@ -35,6 +36,7 @@ export function MemoryCard({ memory }: MemoryCardProps) {
   const [draft, setDraft] = useState(memory.content);
   const updateMutation = useUpdateMemory();
   const deleteMutation = useDeleteMemory();
+  const confirm = useConfirm();
 
   function save() {
     const trimmed = draft.trim();
@@ -56,8 +58,15 @@ export function MemoryCard({ memory }: MemoryCardProps) {
     setDraft(memory.content);
   }
 
-  function onDelete() {
-    if (!confirm("¿Eliminar esta memoria?")) return;
+  async function onDelete() {
+    const ok = await confirm({
+      title: "Eliminar memoria",
+      message: "Esta acción no se puede deshacer. La memoria se moverá al historial de eliminadas.",
+      confirmText: "Eliminar",
+      cancelText: "Cancelar",
+      variant: "danger",
+    });
+    if (!ok) return;
     deleteMutation.mutate(memory.id);
   }
 

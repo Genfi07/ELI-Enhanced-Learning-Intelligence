@@ -13,6 +13,7 @@ import {
   useUnblockUser,
 } from "@/lib/hooks/use-admin";
 import { cn, formatRelativeDate } from "@/lib/utils";
+import { useConfirm } from "@/lib/stores/confirm-store";
 
 const ROLE_OPTIONS = ["USER", "MODERATOR", "ADMIN", "SUPER_ADMIN"];
 
@@ -31,9 +32,22 @@ export default function AdminUsersPage() {
   const unblockMutation = useUnblockUser();
   const roleMutation = useChangeUserRole();
   const deleteMutation = useDeleteUser();
+  const confirm = useConfirm();
 
   if (!current) return null;
   const isSuperAdmin = current.role === "SUPER_ADMIN";
+
+  async function handleDelete(email: string, id: string) {
+    const ok = await confirm({
+      title: "Eliminar usuario",
+      message: `¿Seguro que quieres eliminar a ${email}? Se borrarán sus conversaciones, memorias y archivos. Esta acción no se puede deshacer.`,
+      confirmText: "Eliminar usuario",
+      cancelText: "Cancelar",
+      variant: "danger",
+    });
+    if (!ok) return;
+    deleteMutation.mutate(id);
+  }
 
   return (
     <>
@@ -165,10 +179,7 @@ export default function AdminUsersPage() {
                             <button
                               type="button"
                               disabled={isSelf}
-                              onClick={() => {
-                                if (!confirm(`¿Eliminar a ${u.email}?`)) return;
-                                deleteMutation.mutate(u.id);
-                              }}
+                              onClick={() => handleDelete(u.email, u.id)}
                               className="rounded p-1.5 text-[var(--color-subtle)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-danger)] disabled:cursor-not-allowed disabled:opacity-30"
                               title="Eliminar"
                             >

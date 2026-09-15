@@ -2,15 +2,8 @@
 
 import { useCurrentUser } from "@/lib/hooks/use-current-user";
 import { Sidebar } from "@/components/layout/sidebar";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
-/**
- * Layout protegido de la app.
- *
- * Todas las rutas dentro del route group `(app)` comparten esta shell:
- * sidebar + contenido. El middleware garantiza que solo llegan usuarios
- * con cookie de sesión; aquí solo esperamos a que el user cargue desde
- * /auth/me para pasárselo al sidebar.
- */
 export default function AppLayout({
   children,
 }: {
@@ -27,9 +20,6 @@ export default function AppLayout({
   }
 
   if (isError || !user) {
-    // El middleware debería haber redirigido. Si llegamos aquí, es un caso
-    // raro (cookie revocada en backend sin que el navegador lo sepa).
-    // Forzamos reload para que el middleware re-evalúe.
     if (typeof window !== "undefined") window.location.href = "/login";
     return null;
   }
@@ -38,6 +28,7 @@ export default function AppLayout({
     <div className="flex h-screen overflow-hidden">
       <Sidebar user={user} />
       <div className="flex flex-1 flex-col overflow-hidden">{children}</div>
+      <ConfirmDialog />
     </div>
   );
 }
