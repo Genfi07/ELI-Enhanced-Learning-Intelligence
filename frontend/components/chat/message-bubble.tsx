@@ -3,7 +3,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { Bot, User as UserIcon } from "lucide-react";
+import { Bot, User as UserIcon, Paperclip } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface MessageBubbleProps {
@@ -11,9 +11,16 @@ interface MessageBubbleProps {
   content: string;
   /** Si true, muestra un cursor parpadeante al final (streaming en curso). */
   streaming?: boolean;
+  /** Nombre del archivo adjunto a este mensaje (solo para role=user). */
+  attachmentName?: string | null;
 }
 
-export function MessageBubble({ role, content, streaming }: MessageBubbleProps) {
+export function MessageBubble({
+  role,
+  content,
+  streaming,
+  attachmentName,
+}: MessageBubbleProps) {
   const isUser = role === "user";
 
   return (
@@ -37,6 +44,14 @@ export function MessageBubble({ role, content, streaming }: MessageBubbleProps) 
             : "bg-[var(--color-surface)] text-[var(--color-foreground)]",
         )}
       >
+        {/* Chip del adjunto (solo user) */}
+        {isUser && attachmentName && (
+          <div className="mb-2 inline-flex items-center gap-1.5 rounded bg-white/15 px-2 py-1 text-xs">
+            <Paperclip className="h-3 w-3" />
+            <span className="truncate max-w-[280px]">{attachmentName}</span>
+          </div>
+        )}
+
         {isUser ? (
           <p className="whitespace-pre-wrap break-words leading-relaxed">
             {content}

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { AlertCircle, Sparkles } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { AlertCircle, Sparkles, FileText, UploadCloud } from "lucide-react";
 import { MessageBubble } from "./message-bubble";
 import { ChatInput } from "./chat-input";
 import { useAttachment } from "@/lib/hooks/use-attachment";
@@ -17,11 +17,80 @@ export function ChatView({ chat, title }: ChatViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { attachment, attach, clear } = useAttachment();
 
+  // Estado del drag & drop a nivel de chat completo
+  const [dragging, setDragging] = useState(false);
+  const dragCounterRef = useRef(0);
+
+  // Aviso proactivo: cuando el chip pasa a READY, mostramos un mensaje
+  // de ELI invitando a preguntar sobre el archivo.
+  const [proactiveNotice, setProactiveNotice] = useState<{
+    fileName: string;
+    chunkCount: number;
+    docId: string;
+  } | null>(null);
+
+  const lastReadyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      attachment?.status === "ready" &&
+      attachment.docId &&
+      lastReadyRef.current !== attachment.docId
+    ) {
+      lastReadyRef.current = attachment.docId;
+      setProactiveNotice({
+        fileName: attachment.fileName,
+        chunkCount: attachment.chunkCount ?? 0,
+        docId: attachment.docId,
+      });
+    }
+    if (!attachment) {
+      lastReadyRef.current = null;
+    }
+  }, [attachment]);
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [state.messages]);
+  }, [state.messages, proactiveNotice]);
+
+  // ------------------------------------------------------------------ //
+  // Drag & drop global del chat
+  // ------------------------------------------------------------------ //
+  const canAcceptDrop = !attachment && !state.streaming;
+
+  function onDragEnter(e: React.DragEvent<HTMLDivElement>) {
+    if (!canAcceptDrop) return;
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    dragCounterRef.current += 1;
+    if (dragCounterRef.current === 1) setDragging(true);
+  }
+
+  function onDragOver(e: React.DragEvent<HTMLDivElement>) {
+    if (!canAcceptDrop) return;
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }
+
+  function onDragLeave(e: React.DragEvent<HTMLDivElement>) {
+    if (!canAcceptDrop) return;
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setDragging(false);
+    }
+  }
+
+  function onDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    setDragging(false);
+    if (!canAcceptDrop) return;
+    const file = e.dataTransfer.files?.[0];
+    if (file) attach(file);
+  }
 
   function handleSend(text: string) {
     const attachedIds =
@@ -30,9 +99,8 @@ export function ChatView({ chat, title }: ChatViewProps) {
         : [];
 
     send(text, attachedIds);
+    setProactiveNotice(null);
 
-    // Limpiamos el chip tras enviar. El archivo sigue vivo en /files
-    // para que el usuario lo pueda ver y gestionar.
     if (attachedIds.length > 0) {
       clear();
     }
@@ -41,9 +109,15 @@ export function ChatView({ chat, title }: ChatViewProps) {
   const isEmpty = state.messages.length === 0;
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className="relative flex flex-1 flex-col overflow-hidden"
+    >
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        {isEmpty ? (
+        {isEmpty && !proactiveNotice ? (
           <EmptyState />
         ) : (
           <div className="mx-auto flex max-w-3xl flex-col py-4">
@@ -60,6 +134,31 @@ export function ChatView({ chat, title }: ChatViewProps) {
                 />
               );
             })}
+
+            {proactiveNotice && (
+              <div className="flex w-full justify-start gap-3 px-4 py-4">
+                <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
+                  <FileText className="h-4 w-4" />
+                </div>
+                <div className="max-w-[min(720px,80%)] rounded-lg bg-[var(--color-surface)] px-4 py-2.5 text-sm text-[var(--color-foreground)]">
+                  <p>
+                    He recibido <strong>{proactiveNotice.fileName}</strong>.
+                    {proactiveNotice.chunkCount > 0 && (
+                      <>
+                        {" "}
+                        Lo he dividido en {proactiveNotice.chunkCount}{" "}
+                        fragmentos y ya lo tengo presente.
+                      </>
+                    )}{" "}
+                    ¿Qué quieres que haga con él?
+                  </p>
+                  <p className="mt-1.5 text-xs text-[var(--color-subtle)]">
+                    Escríbeme qué necesitas: resumirlo, buscar algo concreto,
+                    comparar secciones, extraer datos…
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -82,6 +181,21 @@ export function ChatView({ chat, title }: ChatViewProps) {
           title ? `Continúa la conversación…` : "Pregúntale algo a ELI…"
         }
       />
+
+      {/* Overlay global de drop */}
+      {dragging && (
+        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-[var(--color-primary)] bg-[var(--color-surface)] px-12 py-10 shadow-2xl">
+            <UploadCloud className="h-12 w-12 text-[var(--color-primary)]" />
+            <p className="text-lg font-semibold text-[var(--color-foreground)]">
+              Suelta el archivo aquí
+            </p>
+            <p className="text-sm text-[var(--color-muted)]">
+              PDF, DOCX, XLSX, TXT, MD, CSV o JSON
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -99,7 +213,7 @@ function EmptyState() {
           complejas y usa herramientas cuando hace falta.
         </p>
         <p className="mt-3 text-xs text-[var(--color-subtle)]">
-          Puedes adjuntar un PDF, Word, Excel o imagen con el clip 📎
+          Arrastra un PDF, Word, Excel o imagen al chat, o pégalo con Ctrl+V.
         </p>
       </div>
     </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Square, Paperclip } from "lucide-react";
+import { ArrowUp, Square, Paperclip, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ACCEPTED_ATTR, type Attachment } from "@/lib/hooks/use-attachment";
 import { ChatAttachment } from "./chat-attachment";
@@ -43,15 +43,42 @@ export function ChatInput({
     el.style.height = `${Math.min(el.scrollHeight, max)}px`;
   }, [value]);
 
-  const isAttachmentReady =
-    !attachment || attachment.status === "ready";
+  // Ctrl+V: capturar archivos o imágenes del portapapeles
+  useEffect(() => {
+    const attachFn = onAttach;
+    if (!attachFn) return;
+
+    function handlePaste(e: ClipboardEvent) {
+      if (attachment) return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === "file") {
+          const file = item.getAsFile();
+          if (file) {
+            e.preventDefault();
+            attachFn?.(file);
+            return;
+          }
+        }
+      }
+    }
+
+    document.addEventListener("paste", handlePaste);
+    return () => document.removeEventListener("paste", handlePaste);
+  }, [onAttach, attachment]);
+
+  const isAttachmentPending =
+    !!attachment &&
+    (attachment.status === "uploading" ||
+      attachment.status === "processing");
 
   function submit() {
     const trimmed = value.trim();
     if (disabled || streaming) return;
-    // Permitimos enviar con adjunto aunque no haya texto.
     if (!trimmed && !attachment) return;
-    if (attachment && !isAttachmentReady) return;
     onSend(trimmed);
     setValue("");
   }
@@ -70,10 +97,7 @@ export function ChatInput({
   }
 
   const canSend =
-    !disabled &&
-    !streaming &&
-    (value.trim().length > 0 || !!attachment) &&
-    isAttachmentReady;
+    !disabled && !streaming && (value.trim().length > 0 || !!attachment);
 
   return (
     <div className="border-t border-[var(--color-border)] bg-[var(--color-background)] p-4">
@@ -82,6 +106,21 @@ export function ChatInput({
           attachment={attachment}
           onRemove={onRemoveAttachment}
         />
+      )}
+
+      {isAttachmentPending && (
+        <p className="mx-auto mb-2 flex max-w-3xl items-center justify-center gap-1.5 text-xs text-[var(--color-muted)]">
+          <AlertCircle className="h-3 w-3" />
+          El archivo aún se está procesando. Si envías ahora, ELI responderá
+          sin leerlo.
+        </p>
+      )}
+
+      {attachment && attachment.status === "failed" && (
+        <p className="mx-auto mb-2 flex max-w-3xl items-center justify-center gap-1.5 text-xs text-[var(--color-danger)]">
+          <AlertCircle className="h-3 w-3" />
+          El archivo no se procesó. Envíalo de nuevo o quítalo con la X.
+        </p>
       )}
 
       <div
@@ -103,7 +142,7 @@ export function ChatInput({
               "disabled:cursor-not-allowed disabled:opacity-40",
             )}
             aria-label="Adjuntar archivo"
-            title="Adjuntar archivo"
+            title="Adjuntar archivo (arrastra, pega o haz click)"
           >
             <Paperclip className="h-4 w-4" />
           </button>
@@ -161,7 +200,8 @@ export function ChatInput({
       </div>
 
       <p className="mx-auto mt-2 max-w-3xl text-center text-xs text-[var(--color-subtle)]">
-        Enter para enviar · Shift + Enter para nueva línea
+        Enter para enviar · Shift + Enter para nueva línea · Arrastra o pega
+        archivos (Ctrl+V)
       </p>
     </div>
   );
