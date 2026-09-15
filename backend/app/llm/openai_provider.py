@@ -4,13 +4,19 @@ Acepta `name`, `api_key`, `base_url` y `default_model` como parámetros
 opcionales. Si no se pasan, lee de settings (comportamiento anterior).
 Así el mismo provider sirve para Groq, Cerebras, SambaNova, OpenRouter,
 Gemini y Ollama — todos hablan el mismo protocolo.
+
+IMPORTANTE — política de reintentos:
+  Este provider NO reintenta. Ni con tenacity, ni con el retry interno
+  del SDK (`max_retries=0`). Cuando recibe un 429, un timeout o un 5xx,
+  el error sube inmediatamente al `FallbackLLMProvider`, que decide si
+  rotar al siguiente proveedor de la cadena. Esto evita esperar 8s+ con
+  backoff exponencial cuando otro proveedor puede responder en 1s.
 """
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
 from openai import AsyncOpenAI
-from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.config.settings import get_settings
 from app.core.schemas.llm import LLMChunk, LLMMessage, LLMResponse, TokenUsage
@@ -50,6 +56,9 @@ class OpenAIProvider:
         client_kwargs: dict = {
             "api_key": key,
             "timeout": timeout_s or settings.llm_request_timeout_s,
+            # Sin retry interno del SDK: el FallbackLLMProvider decide si
+            # rotar al siguiente proveedor de la cadena.
+            "max_retries": 0,
         }
         url = base_url if base_url is not None else settings.openai_base_url
         if url:
@@ -62,7 +71,6 @@ class OpenAIProvider:
     def default_model(self) -> str:
         return self._default_model
 
-    @retry(stop=stop_after_attempt(2), wait=wait_exponential(min=0.4, max=2.0))
     async def generate(
         self,
         messages: list[LLMMessage],

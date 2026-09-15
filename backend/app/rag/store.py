@@ -1,19 +1,12 @@
 """KnowledgeStore: repositorio de documentos y búsqueda híbrida sobre chunks.
 
-Diseño:
-  - Toda operación recibe `user_id` explícito. El filtro de scope se aplica
-    además dentro de las queries:
-      * scope = 'USER'    → solo si owner_user_id = user_id
-      * scope = 'ORG'     → solo si org_id coincide con la org del usuario
-      * scope = 'GLOBAL'  → siempre visible
-    En esta fase solo implementamos USER (ORG y GLOBAL llegan con multi-tenant
-    en Fase 7). El filtro ya está preparado.
-
-  - Búsqueda híbrida idéntica a la de memoria (RRF sobre vectorial + keyword).
-    Esto maximiza la calidad de recuperación sin duplicar arquitectura.
-
-  - No hay lógica de embeddings aquí: se recibe un vector ya calculado o
-    se le pide al EmbeddingsProvider inyectado.
+Ciclo de vida efímero:
+  - Los documentos "activos" son los que tienen deleted_at IS NULL y
+    hidden_at IS NULL.
+  - Los documentos "eliminados" tienen deleted_at pero no hidden_at.
+    Ya no aparecen en búsquedas (sus chunks fueron borrados).
+  - Los documentos "ocultos" tienen hidden_at. No aparecen en ninguna
+    consulta normal. ELI sigue sabiendo que existieron (summary + topics).
 """
 from __future__ import annotations
 
@@ -21,7 +14,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.contracts.embeddings import EmbeddingsProvider
@@ -47,7 +40,7 @@ class KnowledgeStore:
         self.embeddings = embeddings
 
     # ------------------------------------------------------------------ #
-    # Documentos
+    # Documentos — creación y lectura
     # ------------------------------------------------------------------ #
     async def create_document(
         self,
@@ -94,12 +87,56 @@ class KnowledgeStore:
         status: str | None = None,
         limit: int = 100,
     ) -> list[Document]:
-        stmt = select(Document).where(Document.owner_user_id == user_id)
+        """Lista documentos NO ocultos (activos + eliminados)."""
+        stmt = select(Document).where(
+            Document.owner_user_id == user_id,
+            Document.hidden_at.is_(None),
+        )
         if status:
             stmt = stmt.where(Document.status == status)
         stmt = stmt.order_by(Document.updated_at.desc()).limit(limit)
         return list((await self.session.scalars(stmt)).all())
 
+    async def list_documents_by_state(
+        self,
+        user_id: uuid.UUID,
+        *,
+        state: str = "active",
+        limit: int = 100,
+    ) -> list[Document]:
+        """Lista documentos por estado visible.
+
+        - active:  no eliminados, no ocultos.
+        - deleted: eliminados pero no ocultos.
+        - all:     no ocultos (activos + eliminados).
+        """
+        base = select(Document).where(Document.owner_user_id == user_id)
+
+        if state == "active":
+            base = base.where(
+                Document.deleted_at.is_(None),
+                Document.hidden_at.is_(None),
+            )
+        elif state == "deleted":
+            base = base.where(
+                Document.deleted_at.is_not(None),
+                Document.hidden_at.is_(None),
+            )
+        elif state == "all":
+            base = base.where(Document.hidden_at.is_(None))
+        else:
+            # Fallback seguro: activos
+            base = base.where(
+                Document.deleted_at.is_(None),
+                Document.hidden_at.is_(None),
+            )
+
+        base = base.order_by(Document.updated_at.desc()).limit(limit)
+        return list((await self.session.scalars(base)).all())
+
+    # ------------------------------------------------------------------ #
+    # Documentos — mutaciones
+    # ------------------------------------------------------------------ #
     async def update_status(
         self,
         document_id: uuid.UUID,
@@ -132,35 +169,62 @@ class KnowledgeStore:
         await self.session.delete(doc)
         return doc
 
+    async def soft_delete_document(
+        self, user_id: uuid.UUID, document_id: uuid.UUID
+    ) -> Document | None:
+        """Marca el documento como eliminado y borra sus chunks + embeddings.
+
+        El documento sigue visible en la UI (tachado) hasta que el usuario
+        llame a `hide_document`.
+        """
+        doc = await self.get_document(user_id, document_id)
+        if doc is None:
+            return None
+
+        # Borrar chunks (con embeddings por cascade de DELETE).
+        await self.delete_chunks_for_document(document_id)
+
+        doc.deleted_at = datetime.now(timezone.utc)
+        doc.chunk_count = 0
+        await self.session.flush()
+        return doc
+
+    async def hide_document(
+        self, user_id: uuid.UUID, document_id: uuid.UUID
+    ) -> Document | None:
+        """Oculta la entrada del documento. ELI sigue sabiéndolo por summary."""
+        doc = await self.get_document(user_id, document_id)
+        if doc is None:
+            return None
+        doc.hidden_at = datetime.now(timezone.utc)
+        await self.session.flush()
+        return doc
+
+    async def mark_physical_deleted(self, document_id: uuid.UUID) -> None:
+        """Registra cuándo se borró el archivo físico (auditoría)."""
+        doc = await self.session.get(Document, document_id)
+        if doc is None:
+            return
+        doc.physical_deleted_at = datetime.now(timezone.utc)
+        await self.session.flush()
+
+    async def update_summary_and_topics(
+        self,
+        document_id: uuid.UUID,
+        *,
+        summary: str | None,
+        topics: list[str],
+    ) -> None:
+        doc = await self.session.get(Document, document_id)
+        if doc is None:
+            return
+        doc.summary = (summary or "")[:2000] or None
+        doc.topics = topics
+        await self.session.flush()
+
     # ------------------------------------------------------------------ #
     # Chunks
     # ------------------------------------------------------------------ #
-    async def add_chunks(
-        self,
-        document_id: uuid.UUID,
-        chunks: list[tuple[str, int, dict, list[float] | None]],
-    ) -> int:
-        """Inserta chunks en batch.
-
-        Cada item es: (content, token_count, meta, embedding_o_None).
-        Devuelve cuántos se insertaron.
-        """
-        for content, token_count, meta, emb in chunks:
-            self.session.add(
-                DocumentChunk(
-                    document_id=document_id,
-                    chunk_index=len(self.session.new),  # provisional, se reasigna
-                    content=content,
-                    token_count=token_count,
-                    embedding=emb,
-                    meta=meta or {},
-                )
-            )
-        # Nota: el chunk_index se asigna correctamente fuera, aquí se pasa ya
-        # resuelto desde el pipeline de ingesta. Reasignamos por claridad.
-        await self.session.flush()
-        return len(chunks)
-
     async def insert_chunks(
         self,
         document_id: uuid.UUID,
@@ -219,7 +283,6 @@ class KnowledgeStore:
             user_id, query, limit=candidate_pool, org_id=org_id
         )
 
-        # RRF
         rrf: dict[uuid.UUID, float] = {}
         for rank, cid in enumerate(vector_ids):
             rrf[cid] = rrf.get(cid, 0.0) + 1.0 / (RRF_K + rank + 1)
@@ -234,7 +297,6 @@ class KnowledgeStore:
         chunks = list((await self.session.scalars(stmt)).all())
         chunks_by_id = {c.id: c for c in chunks}
 
-        # Necesitamos los títulos: cargamos los documentos referenciados
         doc_ids = list({c.document_id for c in chunks})
         docs = list(
             (
@@ -277,8 +339,8 @@ class KnowledgeStore:
         limit: int,
         org_id: uuid.UUID | None,
     ) -> list[tuple[uuid.UUID, float]]:
-        # Filtro de scope: USER (siempre propio) + ORG (si org_id) + GLOBAL.
         scope_sql, params = _scope_filter(user_id, org_id)
+        # Solo documentos activos: READY, no eliminados, no ocultos.
         stmt = text(
             f"""
             SELECT dc.id, 1 - (dc.embedding <=> CAST(:vec AS vector)) AS sim
@@ -286,6 +348,8 @@ class KnowledgeStore:
             JOIN documents d ON d.id = dc.document_id
             WHERE dc.embedding IS NOT NULL
               AND d.status = 'READY'
+              AND d.deleted_at IS NULL
+              AND d.hidden_at IS NULL
               AND ({scope_sql})
             ORDER BY dc.embedding <=> CAST(:vec AS vector)
             LIMIT :lim
@@ -305,12 +369,15 @@ class KnowledgeStore:
         org_id: uuid.UUID | None,
     ) -> list[uuid.UUID]:
         scope_sql, params = _scope_filter(user_id, org_id)
+        # Solo documentos activos: READY, no eliminados, no ocultos.
         stmt = text(
             f"""
             SELECT dc.id
             FROM document_chunks dc
             JOIN documents d ON d.id = dc.document_id
             WHERE d.status = 'READY'
+              AND d.deleted_at IS NULL
+              AND d.hidden_at IS NULL
               AND ({scope_sql})
               AND to_tsvector('spanish', dc.content) @@
                   plainto_tsquery('spanish', :q)
@@ -330,12 +397,6 @@ class KnowledgeStore:
 # Helpers
 # --------------------------------------------------------------------------- #
 def _scope_filter(user_id: uuid.UUID, org_id: uuid.UUID | None) -> tuple[str, dict]:
-    """Devuelve la cláusula SQL de scope + parámetros.
-
-    En esta fase solo creamos documentos con scope='USER'. La cláusula se
-    deja preparada para multi-tenant: si el usuario tiene org, verá también
-    documentos ORG de esa org; todos ven los GLOBAL.
-    """
     parts = ["(d.scope = 'USER' AND d.owner_user_id = :uid)"]
     params: dict = {"uid": str(user_id)}
     if org_id is not None:

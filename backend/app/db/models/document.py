@@ -5,13 +5,13 @@ from typing import Any
 
 from sqlalchemy import (
     DateTime,
-    Float,
     ForeignKey,
     Index,
     Integer,
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -20,23 +20,28 @@ from pgvector.sqlalchemy import Vector
 
 from app.db.base import Base, Timestamps, UUIDPk
 
-# Misma dimensión que memories para reutilizar EmbeddingsProvider.
 EMBEDDING_DIM = 1536
 
 
 class Document(Base, UUIDPk, Timestamps):
     """Un documento subido por el usuario.
 
-    Estados:
-      - PENDING: recién subido, esperando procesamiento
-      - PROCESSING: extrayendo texto / generando embeddings
-      - READY: procesado y disponible para búsqueda
-      - FAILED: falló el procesamiento (ver `error`)
+    Ciclo de vida efímero:
+      1. Subida → PENDING. El archivo físico vive en storage.
+      2. Ingesta → PROCESSING → READY. El archivo físico se BORRA.
+         A partir de aquí, solo existen chunks + embeddings en BD.
+      3. Usuario elimina → deleted_at se setea. Los chunks se borran.
+         La entrada queda visible como "Eliminado" (tachado en rojo).
+      4. Usuario oculta → hidden_at se setea. La entrada desaparece de UI.
+         ELI sigue sabiendo que existió (por el resumen + topics).
 
-    Scopes (para futuro multi-tenant):
-      - USER: visible solo para el dueño
-      - ORG: visible para todos los miembros de la organización
-      - GLOBAL: visible para todos (solo admins pueden crear)
+    Estados (`status`):
+      - PENDING, PROCESSING, READY, FAILED
+
+    Visibilidad (derivada, no es un campo):
+      - Activo: deleted_at IS NULL AND hidden_at IS NULL
+      - Eliminado: deleted_at IS NOT NULL AND hidden_at IS NULL
+      - Oculto: hidden_at IS NOT NULL
     """
 
     __tablename__ = "documents"
@@ -59,10 +64,26 @@ class Document(Base, UUIDPk, Timestamps):
     status: Mapped[str] = mapped_column(String(20), default="PENDING", nullable=False, index=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Número total de chunks generados. Útil para UI y para detectar reprocesamiento.
     chunk_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
-    # Metadata libre: número de páginas, autor, idioma detectado, etc.
+    # ---- Ciclo de vida efímero ----
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    hidden_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    physical_deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # ---- Resumen + topics para que ELI recuerde el documento ----
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    topics: Mapped[list[str]] = mapped_column(
+        JSONB, default=list, nullable=False, server_default=text("'[]'::jsonb")
+    )
+
+    # Metadata libre adicional (páginas, autor, idioma, etc.).
     meta: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
 
     chunks = relationship(
@@ -74,6 +95,8 @@ class Document(Base, UUIDPk, Timestamps):
     __table_args__ = (
         Index("ix_documents_owner_status", "owner_user_id", "status"),
         Index("ix_documents_owner_scope", "owner_user_id", "scope"),
+        Index("ix_documents_owner_deleted", "owner_user_id", "deleted_at"),
+        Index("ix_documents_owner_hidden", "owner_user_id", "hidden_at"),
     )
 
 
@@ -91,12 +114,10 @@ class DocumentChunk(Base, UUIDPk):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     token_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
-    # Vector de embedding. Nullable para permitir inserciones en batch.
     embedding: Mapped[list[float] | None] = mapped_column(
         Vector(EMBEDDING_DIM), nullable=True
     )
 
-    # Metadata por chunk: página de origen, sección, etc.
     meta: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(

@@ -10,6 +10,9 @@ from pydantic import BaseModel, Field
 DocumentStatus = Literal["PENDING", "PROCESSING", "READY", "FAILED"]
 DocumentScope = Literal["USER", "ORG", "GLOBAL"]
 
+# Estado derivado para la UI (Activo / Eliminado / Oculto).
+DocumentVisibility = Literal["ACTIVE", "DELETED", "HIDDEN"]
+
 
 class DocumentOut(BaseModel):
     """Vista pública de un documento."""
@@ -24,6 +27,15 @@ class DocumentOut(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # Ciclo de vida efímero
+    deleted_at: datetime | None = None
+    hidden_at: datetime | None = None
+    physical_deleted_at: datetime | None = None
+
+    # Contenido "recordado" por ELI (sobrevive al borrado de chunks)
+    summary: str | None = None
+    topics: list[str] = Field(default_factory=list)
+
     @classmethod
     def from_model(cls, d) -> "DocumentOut":
         return cls(
@@ -37,6 +49,11 @@ class DocumentOut(BaseModel):
             error=d.error,
             created_at=d.created_at,
             updated_at=d.updated_at,
+            deleted_at=d.deleted_at,
+            hidden_at=d.hidden_at,
+            physical_deleted_at=d.physical_deleted_at,
+            summary=d.summary,
+            topics=list(d.topics or []),
         )
 
 

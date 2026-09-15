@@ -1,4 +1,4 @@
-"""Pipeline de ingesta de documentos.
+"""Pipeline de ingesta de documentos con ciclo de vida efímero.
 
 Flujo completo:
   1. Marcar documento como PROCESSING.
@@ -7,32 +7,31 @@ Flujo completo:
   4. Extraer texto con el ExtractorRegistry.
   5. Chunkificar con DocumentChunker.
   6. Embedder los chunks en batch.
-  7. Insertar chunks + actualizar contador.
-  8. Marcar documento como READY.
-  9. Borrar el temporal.
+  7. Insertar chunks + actualizar contador → READY.
+  8. Generar summary + topics con LLM.
+  9. Borrar el archivo físico (archivo original ya no se guarda).
+ 10. Borrar el temporal.
 
 En cualquier fallo:
-  - Marcar documento como FAILED con el mensaje de error.
+  - Marcar documento como FAILED.
   - Borrar el temporal.
-  - No propagar la excepción (la task corre en background).
-
-Diseño:
-  - La task abre su PROPIA sesión de BD con session_scope(). La sesión del
-    request del endpoint ya está cerrada cuando esto corre.
-  - `schedule_ingest` respeta `settings.ingestion_enabled`: en tests se
-    desactiva para evitar tareas de fondo compitiendo con la lógica de
-    los tests.
+  - NO borrar el archivo físico (así el usuario puede reprocesar).
 """
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 import tempfile
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.config.settings import get_settings
 from app.core.contracts.embeddings import EmbeddingsProvider
+from app.core.contracts.llm import LLMProvider
 from app.core.contracts.storage import StorageBackend
+from app.core.schemas.llm import LLMMessage
 from app.db.session import session_scope
 from app.observability.logging import get_logger
 from app.rag.chunker import DocumentChunker
@@ -46,16 +45,46 @@ class IngestionError(RuntimeError):
     """Error durante la ingesta de un documento."""
 
 
+# Máximo de caracteres del documento que enviamos al LLM para resumir.
+SUMMARY_INPUT_MAX_CHARS = 12_000
+
+
+SUMMARY_PROMPT = """\
+Eres un extractor de resúmenes y temas para ELI, una asistente con memoria.
+
+Recibes el texto de un documento subido por el usuario. Tu trabajo es
+producir un resumen corto y una lista de topics para que ELI pueda
+recordar de qué iba el documento incluso después de que el usuario
+lo elimine (solo se conserva este resumen).
+
+Devuelve EXCLUSIVAMENTE un JSON con este formato. Sin markdown ni
+explicaciones adicionales:
+
+{
+  "summary": "resumen de 2-3 frases claras sobre qué trata el documento",
+  "topics": ["topic1", "topic2", "topic3"]
+}
+
+Reglas:
+- summary: 2-3 frases. Describe el contenido, no lo valores.
+- topics: entre 3 y 8 temas concretos. Palabras o frases cortas.
+- Si el documento es basura o no tiene contenido útil, devuelve
+  {"summary": null, "topics": []}.
+"""
+
+
 class DocumentIngestor:
     def __init__(
         self,
         storage: StorageBackend,
         embeddings: EmbeddingsProvider,
+        llm: LLMProvider | None = None,
         extractors: ExtractorRegistry | None = None,
         chunker: DocumentChunker | None = None,
     ) -> None:
         self.storage = storage
         self.embeddings = embeddings
+        self.llm = llm
         self.extractors = extractors or _build_registry()
         self.chunker = chunker or DocumentChunker()
 
@@ -67,26 +96,19 @@ class DocumentIngestor:
         document_id: uuid.UUID,
         user_id: uuid.UUID,
     ) -> None:
-        """Lanza la ingesta en background. No bloquea.
-
-        Si `settings.ingestion_enabled=False` (típicamente en tests), no hace
-        nada. El documento queda en PENDING y los tests pueden verificarlo
-        sin race conditions.
-        """
+        """Lanza la ingesta en background. No bloquea."""
         if not get_settings().ingestion_enabled:
             return
-        asyncio.create_task(self._run(document_id, user_id))
+        task = asyncio.create_task(self._run(document_id, user_id))
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
 
     async def ingest_sync(
         self,
         document_id: uuid.UUID,
         user_id: uuid.UUID,
     ) -> None:
-        """Igual que schedule_ingest pero bloquea hasta terminar.
-
-        Útil para tests y para procesamiento batch. Ignora el flag
-        `ingestion_enabled`: si lo llamas explícitamente, corre.
-        """
+        """Igual que schedule_ingest pero bloquea hasta terminar."""
         await self._run(document_id, user_id)
 
     # ------------------------------------------------------------------ #
@@ -151,7 +173,7 @@ class DocumentIngestor:
                     f"embeddings devolvió {len(vectors)} vectores para {len(texts)} chunks"
                 )
 
-            # 5. Persistir chunks + actualizar documento (nueva sesión)
+            # 5. Persistir chunks + READY
             async with session_scope() as session:
                 store = KnowledgeStore(session, self.embeddings)
                 await store.insert_chunks(
@@ -177,6 +199,28 @@ class DocumentIngestor:
                 chunks=len(chunks),
                 chars=sum(len(c.text) for c in chunks),
             )
+
+            # 6. Summary + topics con LLM
+            await self._generate_summary_and_topics(
+                document_id, chunks_text=texts
+            )
+
+            # 7. Borrar el archivo físico (ya no lo necesitamos)
+            try:
+                await self.storage.delete(user_id, storage_path)
+                async with session_scope() as session:
+                    store = KnowledgeStore(session, self.embeddings)
+                    await store.mark_physical_deleted(document_id)
+                log.info(
+                    "ingest_physical_file_removed",
+                    document_id=str(document_id),
+                )
+            except Exception as exc:
+                log.warning(
+                    "ingest_physical_delete_failed",
+                    document_id=str(document_id),
+                    error=str(exc),
+                )
         except Exception as exc:
             log.warning(
                 "ingest_failed",
@@ -203,10 +247,54 @@ class DocumentIngestor:
                     pass
 
     # ------------------------------------------------------------------ #
+    # Summary + topics
+    # ------------------------------------------------------------------ #
+    async def _generate_summary_and_topics(
+        self,
+        document_id: uuid.UUID,
+        *,
+        chunks_text: list[str],
+    ) -> None:
+        if self.llm is None:
+            return
+        combined = "\n\n".join(chunks_text)[:SUMMARY_INPUT_MAX_CHARS]
+        try:
+            response = await self.llm.generate(
+                [
+                    LLMMessage(role="system", content=SUMMARY_PROMPT),
+                    LLMMessage(role="user", content=combined),
+                ],
+                temperature=0.2,
+                max_tokens=400,
+                response_format={"type": "json_object"},
+            )
+            parsed = _extract_json(response.text or "")
+            if parsed is None:
+                return
+            summary = parsed.get("summary")
+            topics = parsed.get("topics") or []
+            if not isinstance(topics, list):
+                topics = []
+            topics = [str(t)[:60] for t in topics[:10]]
+
+            async with session_scope() as session:
+                store = KnowledgeStore(session, self.embeddings)
+                await store.update_summary_and_topics(
+                    document_id,
+                    summary=summary if isinstance(summary, str) else None,
+                    topics=topics,
+                )
+        except Exception as exc:
+            log.warning(
+                "ingest_summary_failed",
+                document_id=str(document_id),
+                error=str(exc),
+            )
+
+    # ------------------------------------------------------------------ #
     # Helpers
     # ------------------------------------------------------------------ #
     async def _write_tempfile(self, data: bytes, storage_path: str) -> Path:
-        """Escribe `data` a un archivo temporal preservando la extensión."""
         ext = Path(storage_path).suffix or ".bin"
 
         def _write() -> Path:
@@ -223,6 +311,33 @@ class DocumentIngestor:
         return await loop.run_in_executor(None, _write)
 
 
+# Tareas de fondo que deben sobrevivir al GC.
+_background_tasks: set[asyncio.Task] = set()
+
+
 def _build_registry() -> ExtractorRegistry:
     from app.rag.extractors.base import build_default_registry
     return build_default_registry()
+
+
+def _extract_json(text: str) -> dict | None:
+    if not text:
+        return None
+    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(1))
+        except json.JSONDecodeError:
+            pass
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            pass
+    try:
+        result = json.loads(text)
+        return result if isinstance(result, dict) else None
+    except json.JSONDecodeError:
+        return None
