@@ -1,15 +1,26 @@
 "use client";
 
 import { useState } from "react";
-import { Search, UserX, UserCheck, Trash2 } from "lucide-react";
+import Link from "next/link";
+import {
+  Search,
+  UserX,
+  UserCheck,
+  Trash2,
+  UserPlus,
+  ShieldCheck,
+} from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { UserCreateDialog } from "@/components/admin/user-create-dialog";
 import { useCurrentUser } from "@/lib/hooks/use-current-user";
 import {
   useAdminUsers,
   useBlockUser,
   useChangeUserRole,
   useDeleteUser,
+  usePromoteToSuper,
   useUnblockUser,
 } from "@/lib/hooks/use-admin";
 import { cn, formatRelativeDate } from "@/lib/utils";
@@ -27,11 +38,13 @@ const ROLE_COLOR: Record<string, string> = {
 export default function AdminUsersPage() {
   const { data: current } = useCurrentUser();
   const [search, setSearch] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
   const { data: users, isLoading } = useAdminUsers(search || undefined);
   const blockMutation = useBlockUser();
   const unblockMutation = useUnblockUser();
   const roleMutation = useChangeUserRole();
   const deleteMutation = useDeleteUser();
+  const promoteMutation = usePromoteToSuper();
   const confirm = useConfirm();
 
   if (!current) return null;
@@ -49,6 +62,18 @@ export default function AdminUsersPage() {
     deleteMutation.mutate(id);
   }
 
+  async function handlePromote(name: string, id: string) {
+    const ok = await confirm({
+      title: "Promover a SUPER_ADMIN",
+      message: `${name} tendrá acceso total al sistema, incluida la creación de otros SUPER_ADMINs y la modificación de la configuración. ¿Confirmas?`,
+      confirmText: "Promover",
+      cancelText: "Cancelar",
+      variant: "danger",
+    });
+    if (!ok) return;
+    promoteMutation.mutate(id);
+  }
+
   return (
     <>
       <Header title="Admin · Usuarios" user={current} />
@@ -63,14 +88,20 @@ export default function AdminUsersPage() {
                 Gestiona cuentas, roles y bloqueos.
               </p>
             </div>
-            <div className="relative w-64">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-subtle)]" />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar por email o nombre"
-                className="pl-8"
-              />
+            <div className="flex items-center gap-2">
+              <div className="relative w-56">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-subtle)]" />
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Buscar…"
+                  className="pl-8"
+                />
+              </div>
+              <Button size="sm" onClick={() => setCreateOpen(true)}>
+                <UserPlus className="h-3.5 w-3.5" />
+                Nuevo
+              </Button>
             </div>
           </div>
 
@@ -81,8 +112,12 @@ export default function AdminUsersPage() {
                   <th className="px-4 py-2.5 text-left font-medium">Usuario</th>
                   <th className="px-4 py-2.5 text-left font-medium">Rol</th>
                   <th className="px-4 py-2.5 text-left font-medium">Estado</th>
-                  <th className="px-4 py-2.5 text-left font-medium">Último login</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Acciones</th>
+                  <th className="px-4 py-2.5 text-left font-medium">
+                    Último login
+                  </th>
+                  <th className="px-4 py-2.5 text-right font-medium">
+                    Acciones
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -98,13 +133,20 @@ export default function AdminUsersPage() {
                 )}
                 {users?.map((u) => {
                   const isSelf = u.id === current.id;
+                  const canPromote =
+                    isSuperAdmin && u.role !== "SUPER_ADMIN" && !isSelf;
                   return (
                     <tr
                       key={u.id}
                       className="border-b border-[var(--color-border)] last:border-0"
                     >
                       <td className="px-4 py-3">
-                        <p className="font-medium">{u.name}</p>
+                        <Link
+                          href={`/admin/users/${u.id}`}
+                          className="font-medium hover:text-[var(--color-primary)] hover:underline"
+                        >
+                          {u.name}
+                        </Link>
                         <p className="text-xs text-[var(--color-muted)]">
                           {u.email}
                         </p>
@@ -127,7 +169,11 @@ export default function AdminUsersPage() {
                           )}
                         >
                           {ROLE_OPTIONS.map((r) => (
-                            <option key={r} value={r} className="bg-[var(--color-surface)]">
+                            <option
+                              key={r}
+                              value={r}
+                              className="bg-[var(--color-surface)]"
+                            >
                               {r}
                             </option>
                           ))}
@@ -154,6 +200,17 @@ export default function AdminUsersPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex justify-end gap-1">
+                          {canPromote && (
+                            <button
+                              type="button"
+                              onClick={() => handlePromote(u.name, u.id)}
+                              disabled={promoteMutation.isPending}
+                              className="rounded p-1.5 text-[var(--color-subtle)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-amber-400 disabled:opacity-30"
+                              title="Promover a SUPER_ADMIN"
+                            >
+                              <ShieldCheck className="h-3.5 w-3.5" />
+                            </button>
+                          )}
                           {u.status === "ACTIVE" ? (
                             <button
                               type="button"
@@ -196,6 +253,12 @@ export default function AdminUsersPage() {
           </div>
         </div>
       </main>
+
+      <UserCreateDialog
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        isSuperAdmin={isSuperAdmin}
+      />
     </>
   );
 }

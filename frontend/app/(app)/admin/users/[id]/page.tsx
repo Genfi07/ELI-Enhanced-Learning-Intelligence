@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   Users,
   UserCheck,
@@ -13,6 +14,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   XCircle,
+  type LucideIcon,
 } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { useCurrentUser } from "@/lib/hooks/use-current-user";
@@ -24,6 +26,13 @@ import {
 } from "@/lib/hooks/use-admin";
 import { cn, formatRelativeDate } from "@/lib/utils";
 
+interface DashboardCard {
+  label: string;
+  value: number | string | undefined;
+  icon: LucideIcon;
+  href?: string;
+}
+
 export default function AdminDashboard() {
   const { data: user } = useCurrentUser();
   const { data: overview } = useAnalyticsOverview();
@@ -33,11 +42,16 @@ export default function AdminDashboard() {
 
   if (!user) return null;
 
-  const cards = [
+  const cards: DashboardCard[] = [
     { label: "Usuarios", value: overview?.users_total, icon: Users },
     { label: "Activos", value: overview?.users_active, icon: UserCheck },
     { label: "Bloqueados", value: overview?.users_blocked, icon: UserX },
-    { label: "Conversaciones", value: overview?.conversations_total, icon: MessageSquare },
+    {
+      label: "Conversaciones",
+      value: overview?.conversations_total,
+      icon: MessageSquare,
+      href: "/admin/conversations",
+    },
     { label: "Mensajes", value: overview?.messages_total, icon: Hash },
     { label: "Memorias", value: overview?.memories_total, icon: Brain },
     { label: "Documentos", value: overview?.documents_total, icon: FileText },
@@ -68,11 +82,10 @@ export default function AdminDashboard() {
           <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
             {cards.map((c) => {
               const Icon = c.icon;
-              return (
-                <div
-                  key={c.label}
-                  className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3"
-                >
+              const baseClass =
+                "rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3 transition-colors";
+              const content = (
+                <>
                   <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-[var(--color-subtle)]">
                     <Icon className="h-3 w-3" />
                     {c.label}
@@ -80,6 +93,25 @@ export default function AdminDashboard() {
                   <div className="mt-2 text-xl font-semibold">
                     {c.value ?? "—"}
                   </div>
+                </>
+              );
+              if (c.href) {
+                return (
+                  <Link
+                    key={c.label}
+                    href={c.href}
+                    className={cn(
+                      baseClass,
+                      "hover:border-[var(--color-primary)]/40 hover:bg-[var(--color-surface-hover)]",
+                    )}
+                  >
+                    {content}
+                  </Link>
+                );
+              }
+              return (
+                <div key={c.label} className={baseClass}>
+                  {content}
                 </div>
               );
             })}
@@ -105,7 +137,10 @@ export default function AdminDashboard() {
                 <HealthCard label="Entorno" value={health.env} />
                 <HealthCard label="Versión" value={health.version} />
                 <HealthCard label="LLM" value={health.llm_provider} />
-                <HealthCard label="Embeddings" value={health.embeddings_provider} />
+                <HealthCard
+                  label="Embeddings"
+                  value={health.embeddings_provider}
+                />
                 <HealthCard
                   label="Tools registradas"
                   value={String(health.tools_count)}
@@ -125,9 +160,15 @@ export default function AdminDashboard() {
                   <thead className="border-b border-[var(--color-border)] text-[11px] uppercase tracking-wider text-[var(--color-subtle)]">
                     <tr>
                       <th className="px-4 py-2 text-left font-medium">Fecha</th>
-                      <th className="px-4 py-2 text-right font-medium">Mensajes</th>
-                      <th className="px-4 py-2 text-right font-medium">Tokens</th>
-                      <th className="px-4 py-2 text-right font-medium">Errores</th>
+                      <th className="px-4 py-2 text-right font-medium">
+                        Mensajes
+                      </th>
+                      <th className="px-4 py-2 text-right font-medium">
+                        Tokens
+                      </th>
+                      <th className="px-4 py-2 text-right font-medium">
+                        Errores
+                      </th>
                     </tr>
                   </thead>
                   <tbody>

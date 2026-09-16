@@ -129,3 +129,108 @@ class SystemHealth(BaseModel):
     tools_count: int
     env: str
     version: str
+
+    
+
+# --------------------------------------------------------------------------- #
+# Create & Promote users
+# --------------------------------------------------------------------------- #
+class CreateUserIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    email: str = Field(min_length=3, max_length=255)
+    password: str = Field(min_length=8, max_length=128)
+    role: str = Field(
+        default="USER",
+        pattern="^(USER|MODERATOR|ADMIN|SUPER_ADMIN)$",
+    )
+
+
+class PromoteToSuperIn(BaseModel):
+    """Requiere confirm: true para evitar promociones accidentales."""
+
+    confirm: bool = Field(
+        description="Debe ser true. Evita accidentes por click erróneo."
+    )
+class ResetAllSettingsOut(BaseModel):
+    """Resultado de restablecer toda la configuración."""
+
+    deleted: int = Field(description="Número de overrides eliminados")
+
+    # --------------------------------------------------------------------------- #
+# Config guide
+# --------------------------------------------------------------------------- #
+class GuideEntry(BaseModel):
+    key: str
+    category: str
+    short: str
+    description: str
+    values: str | None = None
+    impact: str | None = None
+    example: str | None = None
+
+    # --------------------------------------------------------------------------- #
+# A2 — Conversaciones, mensajes y stats por usuario
+# --------------------------------------------------------------------------- #
+class AdminConversationOut(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    user_email: str | None = None
+    user_name: str | None = None
+    title: str
+    model: str | None = None
+    status: str
+    messages_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdminMessageOut(BaseModel):
+    id: uuid.UUID
+    role: str
+    content: str
+    tokens_in: int
+    tokens_out: int
+    model: str | None = None
+    created_at: datetime
+
+
+class AdminUserStatsOut(BaseModel):
+    conversations_total: int
+    messages_total: int
+    tokens_in_total: int
+    tokens_out_total: int
+    cost_estimate_usd: float
+    memories_active: int
+    documents_active: int
+    last_activity_at: datetime | None = None
+
+
+class AdminMemoryOut(BaseModel):
+    id: uuid.UUID
+    type: str
+    content: str
+    importance: float
+    confidence: float
+    status: str
+    created_at: datetime
+    last_used_at: datetime | None = None
+
+
+class AdminDocumentOut(BaseModel):
+    id: uuid.UUID
+    title: str
+    mime_type: str
+    size_bytes: int
+    status: str
+    chunk_count: int
+    created_at: datetime
+    deleted_at: datetime | None = None
+    hidden_at: datetime | None = None
+
+
+class AdminUserDetailOut(BaseModel):
+    user: AdminUserOut
+    stats: AdminUserStatsOut
+    recent_conversations: list[AdminConversationOut]
+    recent_memories: list[AdminMemoryOut]
+    recent_documents: list[AdminDocumentOut]
