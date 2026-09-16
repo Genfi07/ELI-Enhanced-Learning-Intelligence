@@ -13,7 +13,7 @@ import type { NextRequest } from "next/server";
  * redirige a /login?from=<ruta original>. Tras login, el frontend usa ese
  * `from` para redirigir de vuelta.
  */
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Rutas públicas
