@@ -5,6 +5,7 @@ import { AlertCircle, Sparkles, FileText, UploadCloud } from "lucide-react";
 import { MessageBubble } from "./message-bubble";
 import { ChatInput } from "./chat-input";
 import { useAttachment } from "@/lib/hooks/use-attachment";
+import { useNewChatStore } from "@/lib/stores/new-chat-store";
 import type { useChat } from "@/lib/hooks/use-chat";
 
 interface ChatViewProps {
@@ -16,6 +17,18 @@ export function ChatView({ chat, title }: ChatViewProps) {
   const { state, send, cancelStream } = chat;
   const scrollRef = useRef<HTMLDivElement>(null);
   const { attachment, attach, clear } = useAttachment();
+
+  // Prompt precargado desde /tools → flujos
+  const consumePrompt = useNewChatStore((s) => s.consumePrompt);
+  const [initialPrompt, setInitialPrompt] = useState<string | undefined>(
+    undefined,
+  );
+  useEffect(() => {
+    const p = consumePrompt();
+    if (p) setInitialPrompt(p);
+    // Se ejecuta solo al montar
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Estado del drag & drop a nivel de chat completo
   const [dragging, setDragging] = useState(false);
@@ -100,6 +113,7 @@ export function ChatView({ chat, title }: ChatViewProps) {
 
     send(text, attachedIds);
     setProactiveNotice(null);
+    setInitialPrompt(undefined);
 
     if (attachedIds.length > 0) {
       clear();
@@ -177,6 +191,7 @@ export function ChatView({ chat, title }: ChatViewProps) {
         onRemoveAttachment={clear}
         attachment={attachment}
         streaming={state.streaming}
+        initialValue={initialPrompt}
         placeholder={
           title ? `Continúa la conversación…` : "Pregúntale algo a ELI…"
         }

@@ -147,12 +147,56 @@ def invalidate_dynamic_cache() -> None:
     """Fuerza recarga en la próxima lectura. Llamar tras cambios admin."""
     _cache.invalidate()
 
+# --------------------------------------------------------------------------- #
+# Enmascarado de secretos
+# --------------------------------------------------------------------------- #
+# Cualquier clave que termine así se considera secreta y se enmascara
+# cuando el usuario no es SUPER_ADMIN.
+_SECRET_SUFFIXES = (
+    "_api_key",
+    "_secret",
+    "_token",
+    "_password",
+)
+_SECRET_EXACT = {
+    "secret_key",
+    "database_url",
+}
 
-async def list_all_settings_with_metadata() -> list[dict[str, Any]]:
+
+def is_secret_key(key: str) -> bool:
+    """True si la clave debe tratarse como secreto."""
+    if key in _SECRET_EXACT:
+        return True
+    return any(key.endswith(s) for s in _SECRET_SUFFIXES)
+
+
+def _mask_secret(value: Any) -> Any:
+    """Enmascara un valor secreto mostrando solo el principio y el final.
+
+    - Strings: 'sk-abc...xyz'
+    - None o vacíos: se devuelven tal cual
+    - Otros tipos: '••••'
+    """
+    if value is None or value == "":
+        return value
+    if not isinstance(value, str):
+        return "••••••"
+    if len(value) <= 12:
+        return "••••••"
+    return f"{value[:6]}…{value[-4:]}"
+
+async def list_all_settings_with_metadata(
+    *, include_secrets: bool = False
+) -> list[dict[str, Any]]:
     """Devuelve todas las claves conocidas (defaults + overrides) con metadata.
 
     Útil para el panel de admin: permite mostrar el default, el valor actual,
     y si el valor actual es un override o el default del código.
+
+    Si `include_secrets=False` (default), las claves secretas se devuelven
+    enmascaradas (tipo `sk-abc…xyz`). Solo SUPER_ADMIN debe llamar con
+    `include_secrets=True`.
     """
     settings: Settings = get_settings()
     defaults = settings.model_dump()
@@ -161,19 +205,29 @@ async def list_all_settings_with_metadata() -> list[dict[str, Any]]:
         rows = list((await session.scalars(select(SystemSetting))).all())
         overrides = {r.key: r for r in rows}
 
-    # Todas las claves: las de settings + las que estén solo en BD
     all_keys = set(defaults.keys()) | set(overrides.keys())
 
     out: list[dict[str, Any]] = []
     for key in sorted(all_keys):
         default_value = defaults.get(key)
         override = overrides.get(key)
+        raw_value = override.value if override else default_value
+
+        secret = is_secret_key(key)
+        if secret and not include_secrets:
+            shown_value = _mask_secret(raw_value)
+            shown_default = _mask_secret(default_value)
+        else:
+            shown_value = raw_value
+            shown_default = default_value
+
         out.append(
             {
                 "key": key,
-                "default": default_value,
-                "value": override.value if override else default_value,
+                "default": shown_default,
+                "value": shown_value,
                 "is_override": override is not None,
+                "is_secret": secret,
                 "category": override.category if override else _infer_category(key),
                 "description": override.description if override else None,
                 "updated_at": override.updated_at if override else None,
@@ -181,7 +235,6 @@ async def list_all_settings_with_metadata() -> list[dict[str, Any]]:
             }
         )
     return out
-
 
 async def set_dynamic_setting(
     key: str,

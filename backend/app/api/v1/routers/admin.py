@@ -194,9 +194,18 @@ async def delete_user(
 # --------------------------------------------------------------------------- #
 @router.get("/config", response_model=list[SettingOut])
 async def list_config(
-    _: User = Depends(require_permission("admin.config")),
+    user: User = Depends(require_permission("admin.config")),
 ) -> list[SettingOut]:
-    items = await dynamic.list_all_settings_with_metadata()
+    """Lista las claves de configuración.
+
+    Solo SUPER_ADMIN ve los valores secretos reales. Los demás roles
+    reciben los secretos enmascarados (ej. `gsk_abc…xyz`).
+    """
+    role_name = user.role.name if user.role else "USER"
+    include_secrets = role_name == "SUPER_ADMIN"
+    items = await dynamic.list_all_settings_with_metadata(
+        include_secrets=include_secrets
+    )
     return [SettingOut(**item) for item in items]
 
 
@@ -215,9 +224,13 @@ async def admin_config_guide(
 @router.get("/config/{key}", response_model=SettingOut)
 async def get_config(
     key: str,
-    _: User = Depends(require_permission("admin.config")),
+    user: User = Depends(require_permission("admin.config")),
 ) -> SettingOut:
-    items = await dynamic.list_all_settings_with_metadata()
+    role_name = user.role.name if user.role else "USER"
+    include_secrets = role_name == "SUPER_ADMIN"
+    items = await dynamic.list_all_settings_with_metadata(
+        include_secrets=include_secrets
+    )
     for item in items:
         if item["key"] == key:
             return SettingOut(**item)
@@ -242,7 +255,12 @@ async def update_config(
         request=request,
     )
     await session.commit()
-    items = await dynamic.list_all_settings_with_metadata()
+
+    role_name = actor.role.name if actor.role else "USER"
+    include_secrets = role_name == "SUPER_ADMIN"
+    items = await dynamic.list_all_settings_with_metadata(
+        include_secrets=include_secrets
+    )
     for item in items:
         if item["key"] == key:
             return SettingOut(**item)

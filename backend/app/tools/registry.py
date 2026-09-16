@@ -18,7 +18,8 @@ from app.core.schemas.tool import ToolManifest
 from app.db.models.tool import Tool as ToolModel
 from app.db.session import session_scope
 from app.observability.logging import get_logger
-
+from app.tools.builtin.google_trends import GoogleTrendsTool
+from app.tools.builtin.youtube_search import YouTubeSearchTool
 log = get_logger(__name__)
 
 
@@ -127,6 +128,8 @@ def build_registry() -> ToolRegistry:
     reg.register(DatetimeTool())
     reg.register(WebFetchTool())
     reg.register(WebSearchTool())
+    reg.register(YouTubeSearchTool())
+    reg.register(GoogleTrendsTool())
 
     _registry = reg
     return reg

@@ -150,6 +150,7 @@ class Settings(BaseSettings):
 
     # Tools (Fase 6)
     tavily_api_key: str | None = None
+    youtube_api_key: str | None = None
     web_fetch_max_bytes: int = 500_000
     web_fetch_timeout_s: int = 15
     tools_max_result_chars: int = 8_000

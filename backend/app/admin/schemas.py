@@ -48,11 +48,11 @@ class SettingOut(BaseModel):
     value: Any
     default: Any
     is_override: bool
+    is_secret: bool = False
     category: str
     description: str | None
     updated_at: datetime | None
     updated_by: uuid.UUID | None
-
 
 class SettingUpdateIn(BaseModel):
     value: Any

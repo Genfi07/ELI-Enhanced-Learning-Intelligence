@@ -15,6 +15,8 @@ interface ChatInputProps {
   streaming?: boolean;
   disabled?: boolean;
   placeholder?: string;
+  /** Texto inicial para el composer. Se aplica una sola vez al montar. */
+  initialValue?: string;
 }
 
 const MAX_ROWS = 8;
@@ -29,8 +31,9 @@ export function ChatInput({
   streaming,
   disabled,
   placeholder = "Escribe un mensaje…",
+  initialValue,
 }: ChatInputProps) {
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(initialValue ?? "");
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -42,6 +45,20 @@ export function ChatInput({
     const max = MAX_ROWS * LINE_HEIGHT + 24;
     el.style.height = `${Math.min(el.scrollHeight, max)}px`;
   }, [value]);
+
+  // Si nos llega initialValue después del montaje, lo aplicamos y
+  // ponemos el cursor al final.
+  useEffect(() => {
+    if (initialValue === undefined) return;
+    setValue(initialValue);
+    // Esperar al repintado antes de mover el cursor
+    requestAnimationFrame(() => {
+      const el = ref.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
+  }, [initialValue]);
 
   // Ctrl+V: capturar archivos o imágenes del portapapeles
   useEffect(() => {

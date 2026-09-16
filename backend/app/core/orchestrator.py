@@ -4,7 +4,8 @@ Pipeline:
   FAST / STANDARD:
     user_message → (confirmation) → (proposal) → (taught_goal)
                  → (identity) → (state) → (datetime) → (goals)
-                 → (attached_documents) → (web_search)
+                 → (attached_documents) → (web_search) → (web_fetch)
+                 → (youtube) → (trends)
                  → (summary) → (memory) → (rag)
                  → build_context → llm_stream → persist → final
                  → tick_state → goal_detector → memory_extraction
@@ -13,16 +14,19 @@ Pipeline:
     igual pero además → planner → executor → synthesis
 
 Orden de bloques del system prompt (de más a menos prioritario):
-  1. confirmation_block    (respuesta a una confirmación del usuario)
-  2. pending_proposal_block (pedir confirmación de una regla)
-  3. identity              (núcleo inmutable + axioms + reglas)
-  4. state                 (ánimo, energía, foco, curiosidad)
-  5. current_datetime      (solo si la pregunta es de hora/fecha)
-  6. goals                 (metas activas de ELI)
-  7. attached_documents    (docs adjuntos por el usuario) ← ALTA PRIORIDAD
-  8. web_search_results    (solo si la pregunta requiere actualidad)
-  9. summary + memory      (resumen de conversación + memorias del usuario)
- 10. documents (RAG)       (búsqueda general sobre todos los docs activos)
+  1. confirmation_block
+  2. pending_proposal_block
+  3. identity
+  4. state
+  5. current_datetime
+  6. goals
+  7. attached_documents
+  8. web_search_results
+  9. fetched_urls
+ 10. youtube_results
+ 11. google_trends
+ 12. summary + memory
+ 13. documents (RAG)
 """
 from __future__ import annotations
 
@@ -35,8 +39,19 @@ from app.core.datetime_context import (
 )
 from app.core.web_search_trigger import (
     extract_search_query,
+    extract_trends_keyword,
+    extract_trends_timeframe,
+    extract_urls,
+    extract_youtube_order,
+    extract_youtube_query,
+    format_fetch_results,
     format_search_results,
+    format_trends_results,
+    format_youtube_results,
+    should_fetch_urls,
+    should_search_trends,
     should_search_web,
+    should_search_youtube,
 )
 from app.eli.identity_service import IdentityService
 from app.eli.rule_confirmation import RuleConfirmationProcessor
@@ -245,11 +260,10 @@ class Orchestrator:
                         s["meta"]["error"] = str(exc)
 
                 # ---------------------------------------------------- #
-                # 1) Bloques de contexto (en orden de prioridad)
+                # 1) Bloques de contexto
                 # ---------------------------------------------------- #
                 extra_blocks: list[str] = []
 
-                # 1.0) Bloques de alta prioridad (respuesta inmediata)
                 if confirmation_block:
                     extra_blocks.append(confirmation_block)
                 if pending_proposal_block:
@@ -294,11 +308,11 @@ class Orchestrator:
                         )
                         s["meta"]["state_error"] = str(exc)
 
-                # 1.c) Contexto temporal (solo si la pregunta lo pide)
+                # 1.c) Contexto temporal
                 if should_inject_datetime(req.message):
                     extra_blocks.append(build_datetime_block())
 
-                # 1.d) Metas propias de ELI
+                # 1.d) Metas propias
                 async with trace.step("load_goals") as s:
                     try:
                         goal_service = GoalService(session)
@@ -315,7 +329,7 @@ class Orchestrator:
                         )
                         s["meta"]["goals_error"] = str(exc)
 
-                # 1.e) Documentos adjuntos explícitamente (ALTA PRIORIDAD)
+                # 1.e) Documentos adjuntos
                 if req.attached_document_ids and self.knowledge is not None:
                     async with trace.step("load_attached_documents") as s:
                         try:
@@ -342,7 +356,7 @@ class Orchestrator:
                             )
                             s["meta"]["error"] = str(exc)
 
-                # 1.f) Búsqueda web (solo si la pregunta lo pide)
+                # 1.f) Búsqueda web
                 if should_search_web(req.message):
                     async with trace.step("web_search") as s:
                         try:
@@ -392,7 +406,178 @@ class Orchestrator:
                             )
                             s["meta"]["error"] = str(exc)
 
-                # 1.g) Resumen de conversación + memoria
+                # 1.f.2) Fetch de URLs explícitas
+                if should_fetch_urls(req.message):
+                    async with trace.step("web_fetch") as s:
+                        try:
+                            urls = extract_urls(req.message)
+                            s["meta"]["urls"] = urls
+
+                            runtime = (
+                                self.executor.tool_runtime
+                                if self.executor is not None
+                                else None
+                            )
+                            if runtime is None or user is None:
+                                s["meta"]["skipped"] = "sin runtime o user"
+                            else:
+                                from app.tools.runtime import (
+                                    ToolInvocationContext,
+                                )
+
+                                ctx = ToolInvocationContext(
+                                    user_id=req.user_id,
+                                    conversation_id=conv.id,
+                                    message_id=user_msg.id,
+                                )
+                                fetched: list[dict] = []
+                                errors: list[tuple[str, str]] = []
+                                for url in urls:
+                                    result = await runtime.invoke(
+                                        session,
+                                        user=user,
+                                        tool_name="web_fetch",
+                                        arguments={"url": url},
+                                        context=ctx,
+                                    )
+                                    if result.status == "OK" and result.result:
+                                        fetched.append(result.result)
+                                    else:
+                                        errors.append(
+                                            (url, result.error or result.status)
+                                        )
+
+                                s["meta"]["ok"] = len(fetched)
+                                s["meta"]["failed"] = len(errors)
+
+                                if fetched or errors:
+                                    block = format_fetch_results(
+                                        fetched, errors
+                                    )
+                                    extra_blocks.append(block)
+                        except Exception as exc:
+                            log.warning(
+                                "web_fetch_failed",
+                                request_id=trace.request_id,
+                                error=str(exc),
+                            )
+                            s["meta"]["error"] = str(exc)
+
+                # 1.f.3) YouTube
+                if should_search_youtube(req.message):
+                    async with trace.step("youtube_search") as s:
+                        try:
+                            query = extract_youtube_query(req.message)
+                            order = extract_youtube_order(req.message)
+                            s["meta"]["query"] = query
+                            s["meta"]["order"] = order
+
+                            runtime = (
+                                self.executor.tool_runtime
+                                if self.executor is not None
+                                else None
+                            )
+                            if runtime is None or user is None:
+                                s["meta"]["skipped"] = "sin runtime o user"
+                            else:
+                                from app.tools.runtime import (
+                                    ToolInvocationContext,
+                                )
+
+                                ctx = ToolInvocationContext(
+                                    user_id=req.user_id,
+                                    conversation_id=conv.id,
+                                    message_id=user_msg.id,
+                                )
+                                result = await runtime.invoke(
+                                    session,
+                                    user=user,
+                                    tool_name="youtube_search",
+                                    arguments={
+                                        "query": query,
+                                        "max_results": 5,
+                                        "order": order,
+                                    },
+                                    context=ctx,
+                                )
+                                s["meta"]["status"] = result.status
+                                s["meta"]["latency_ms"] = result.latency_ms
+
+                                if result.status == "OK":
+                                    block = format_youtube_results(result.result)
+                                    extra_blocks.append(block)
+                                    s["meta"]["results"] = (
+                                        result.result or {}
+                                    ).get("count", 0)
+                                else:
+                                    block = format_youtube_results(
+                                        None, error=result.error or result.status
+                                    )
+                                    extra_blocks.append(block)
+                        except Exception as exc:
+                            log.warning(
+                                "youtube_search_failed",
+                                request_id=trace.request_id,
+                                error=str(exc),
+                            )
+                            s["meta"]["error"] = str(exc)
+
+                # 1.f.4) Google Trends
+                if should_search_trends(req.message):
+                    async with trace.step("google_trends") as s:
+                        try:
+                            keyword = extract_trends_keyword(req.message)
+                            timeframe = extract_trends_timeframe(req.message)
+                            s["meta"]["keyword"] = keyword
+                            s["meta"]["timeframe"] = timeframe
+
+                            runtime = (
+                                self.executor.tool_runtime
+                                if self.executor is not None
+                                else None
+                            )
+                            if runtime is None or user is None:
+                                s["meta"]["skipped"] = "sin runtime o user"
+                            else:
+                                from app.tools.runtime import (
+                                    ToolInvocationContext,
+                                )
+
+                                ctx = ToolInvocationContext(
+                                    user_id=req.user_id,
+                                    conversation_id=conv.id,
+                                    message_id=user_msg.id,
+                                )
+                                result = await runtime.invoke(
+                                    session,
+                                    user=user,
+                                    tool_name="google_trends",
+                                    arguments={
+                                        "keyword": keyword,
+                                        "timeframe": timeframe,
+                                    },
+                                    context=ctx,
+                                )
+                                s["meta"]["status"] = result.status
+                                s["meta"]["latency_ms"] = result.latency_ms
+
+                                if result.status == "OK":
+                                    block = format_trends_results(result.result)
+                                    extra_blocks.append(block)
+                                else:
+                                    block = format_trends_results(
+                                        None, error=result.error or result.status
+                                    )
+                                    extra_blocks.append(block)
+                        except Exception as exc:
+                            log.warning(
+                                "google_trends_failed",
+                                request_id=trace.request_id,
+                                error=str(exc),
+                            )
+                            s["meta"]["error"] = str(exc)
+
+                # 1.g) Resumen + memoria
                 if self.memory is not None:
                     summary_block = self.memory.conversation_summary_block(conv.meta)
                     if summary_block:
@@ -415,7 +600,7 @@ class Orchestrator:
                             )
                             s["meta"]["memory_error"] = str(exc)
 
-                # 1.h) RAG general (solo si el plan lo pide)
+                # 1.h) RAG general
                 if plan.needs_rag and self.knowledge is not None:
                     async with trace.step("retrieve_rag") as s:
                         try:
@@ -604,9 +789,8 @@ class Orchestrator:
                 yield final_event
 
                 # ---------------------------------------------------- #
-                # 7) Tareas de fondo (async, no bloquean la respuesta)
+                # 7) Tareas de fondo
                 # ---------------------------------------------------- #
-                # 7.a) Tick del estado interno
                 async with trace.step("tick_state") as s:
                     try:
                         state_service = StateService(session, self.provider)
@@ -620,7 +804,6 @@ class Orchestrator:
                             error=str(exc),
                         )
 
-                # 7.b) Detector de metas propias (cada 10 turnos o mensaje largo)
                 async with trace.step("maybe_detect_goal") as s:
                     try:
                         meta = dict(conv.meta or {})
@@ -648,7 +831,6 @@ class Orchestrator:
                         )
                         s["meta"]["error"] = str(exc)
 
-                # 7.c) Extracción de memoria y summarización
                 if self.memory is not None:
                     self.memory.schedule_extraction(
                         user_id=req.user_id,
