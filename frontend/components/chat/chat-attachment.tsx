@@ -42,7 +42,7 @@ export function ChatAttachment({ attachment, onRemove }: ChatAttachmentProps) {
         <div className="flex items-center gap-2">
           <p className="truncate text-sm font-medium">{fileName}</p>
           <span className="shrink-0 text-[11px] text-[var(--color-subtle)]">
-            {formatBytes(sizeBytes)}
+            formatBytes(attachment.sizeBytes ?? 0)
           </span>
         </div>
         <div className="mt-0.5 flex items-center gap-1.5 text-[11px]">

@@ -66,13 +66,17 @@ const STATUS_LABEL: Record<GoalStatus, string> = {
 };
 
 export function GoalCard({ goal, canEdit }: GoalCardProps) {
-  const { label, Icon, color } = KIND_META[goal.kind];
+  // Fallback por si el backend devuelve kind null/undefined
+  const kind: GoalKind = (goal.kind ?? "LEARN") as GoalKind;
+  const { label, Icon, color } = KIND_META[kind] ?? KIND_META.LEARN;
+
   const updateMutation = useUpdateGoal();
   const abandonMutation = useAbandonGoal();
   const confirm = useConfirm();
 
   function toggleStatus() {
-    const newStatus: GoalStatus = goal.status === "ACTIVE" ? "PAUSED" : "ACTIVE";
+    const newStatus: GoalStatus =
+      goal.status === "ACTIVE" ? "PAUSED" : "ACTIVE";
     updateMutation.mutate({ id: goal.id, input: { status: newStatus } });
   }
 
@@ -96,6 +100,13 @@ export function GoalCard({ goal, canEdit }: GoalCardProps) {
   const isPaused = goal.status === "PAUSED";
   const isClosed = goal.status === "ACHIEVED" || goal.status === "ABANDONED";
 
+  const originLabel = goal.origin
+    ? (ORIGIN_LABEL[goal.origin] ?? goal.origin)
+    : "—";
+
+  const relatedTopics = goal.related_topics ?? [];
+  const progressNotesCount = goal.progress_notes?.length ?? 0;
+
   return (
     <div
       className={cn(
@@ -117,17 +128,20 @@ export function GoalCard({ goal, canEdit }: GoalCardProps) {
         </span>
 
         <span className="text-[11px] text-[var(--color-subtle)]">
-          {ORIGIN_LABEL[goal.origin] ?? goal.origin}
+          {originLabel}
         </span>
 
-        <span className="text-[11px] text-[var(--color-subtle)]">
-          · prioridad {goal.priority}
-        </span>
+        {goal.priority != null && (
+          <span className="text-[11px] text-[var(--color-subtle)]">
+            · prioridad {goal.priority}
+          </span>
+        )}
 
         <span
           className={cn(
             "ml-auto rounded px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
-            isActive && "bg-[var(--color-success)]/10 text-[var(--color-success)]",
+            isActive &&
+              "bg-[var(--color-success)]/10 text-[var(--color-success)]",
             isPaused && "bg-amber-400/10 text-amber-400",
             goal.status === "ACHIEVED" &&
               "bg-[var(--color-primary)]/10 text-[var(--color-primary)]",
@@ -141,9 +155,9 @@ export function GoalCard({ goal, canEdit }: GoalCardProps) {
 
       <p className="mt-2.5 text-sm leading-relaxed">{goal.content}</p>
 
-      {goal.related_topics.length > 0 && (
+      {relatedTopics.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1">
-          {goal.related_topics.map((t) => (
+          {relatedTopics.map((t) => (
             <span
               key={t}
               className="rounded bg-[var(--color-surface-hover)] px-1.5 py-0.5 text-[10px] text-[var(--color-muted)]"
@@ -163,8 +177,8 @@ export function GoalCard({ goal, canEdit }: GoalCardProps) {
               : `Creada ${formatRelativeDate(goal.created_at)}`}
         </span>
 
-        {goal.progress_notes.length > 0 && (
-          <span>· {goal.progress_notes.length} nota(s)</span>
+        {progressNotesCount > 0 && (
+          <span>· {progressNotesCount} nota(s)</span>
         )}
 
         {canEdit && !isClosed && (

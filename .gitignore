@@ -16,8 +16,9 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# lib/ y lib64/ de Python (build artifacts) — pero no tocar frontend/lib/
 lib64/
+backend/**/lib/
 parts/
 sdist/
 var/
