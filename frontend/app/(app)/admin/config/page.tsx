@@ -35,9 +35,6 @@ import {
 import { cn } from "@/lib/utils";
 import { useConfirm } from "@/lib/stores/confirm-store";
 
-// --------------------------------------------------------------------------- //
-// Metadatos por categoría
-// --------------------------------------------------------------------------- //
 interface CategoryMeta {
   label: string;
   description: string;
@@ -131,9 +128,6 @@ function metaFor(category: string): CategoryMeta {
   );
 }
 
-// --------------------------------------------------------------------------- //
-// Página
-// --------------------------------------------------------------------------- //
 export default function AdminConfigPage() {
   const { data: user } = useCurrentUser();
 
@@ -146,7 +140,6 @@ export default function AdminConfigPage() {
   const confirm = useConfirm();
   const { data: guide } = useConfigGuide();
 
-  // Índice rápido key → short, para el tooltip `?` de cada fila
   const guideByKey = useMemo(() => {
     const acc: Record<string, string> = {};
     for (const e of guide ?? []) acc[e.key] = e.short;
@@ -206,11 +199,11 @@ export default function AdminConfigPage() {
     <>
       <Header title="Admin · Configuración" user={user} />
       <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-4xl px-6 py-8">
+        <div className="mx-auto max-w-4xl px-3 py-6 md:px-6 md:py-8">
           {/* Hero */}
-          <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight">
+              <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
                 Configuración
               </h1>
               <p className="mt-1 text-sm text-[var(--color-muted)]">
@@ -229,31 +222,33 @@ export default function AdminConfigPage() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setGuideOpen(true)}
-                title="Ver guía de configuración"
-              >
-                <BookOpen className="h-3.5 w-3.5" />
-                Ver guía
-              </Button>
-              {totalOverrides > 0 && (
+            <div className="flex flex-col gap-2 md:flex-row md:items-center">
+              <div className="flex gap-2">
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={handleResetAll}
-                  disabled={resetMutation.isPending}
-                  title="Restablecer todos los valores por defecto"
+                  onClick={() => setGuideOpen(true)}
+                  title="Ver guía de configuración"
                 >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  {resetMutation.isPending
-                    ? "Restableciendo…"
-                    : "Restablecer todo"}
+                  <BookOpen className="h-3.5 w-3.5" />
+                  Ver guía
                 </Button>
-              )}
-              <div className="relative w-64">
+                {totalOverrides > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleResetAll}
+                    disabled={resetMutation.isPending}
+                    title="Restablecer todos los valores por defecto"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    {resetMutation.isPending
+                      ? "Restableciendo…"
+                      : "Restablecer todo"}
+                  </Button>
+                )}
+              </div>
+              <div className="relative w-full md:w-64">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-subtle)]" />
                 <Input
                   value={search}
@@ -340,9 +335,6 @@ export default function AdminConfigPage() {
   );
 }
 
-// --------------------------------------------------------------------------- //
-// Card por categoría
-// --------------------------------------------------------------------------- //
 function CategoryCard({
   category,
   items,
@@ -359,7 +351,7 @@ function CategoryCard({
 
   return (
     <section className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
-      <header className="flex items-start justify-between gap-4 border-b border-[var(--color-border)] px-5 py-4">
+      <header className="flex flex-col gap-2 border-b border-[var(--color-border)] px-4 py-3 md:flex-row md:items-start md:justify-between md:gap-4 md:px-5 md:py-4">
         <div className="flex items-start gap-3">
           <div
             className={cn(
@@ -378,7 +370,7 @@ function CategoryCard({
             </p>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5 text-[10px]">
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5 pl-12 text-[10px] md:pl-0">
           <span className="rounded bg-[var(--color-surface-hover)] px-1.5 py-0.5 uppercase tracking-wider text-[var(--color-subtle)]">
             {items.length} valor{items.length === 1 ? "" : "es"}
           </span>
@@ -399,9 +391,6 @@ function CategoryCard({
   );
 }
 
-// --------------------------------------------------------------------------- //
-// Fila de setting
-// --------------------------------------------------------------------------- //
 function SettingRow({
   item,
   helpText,
@@ -443,13 +432,13 @@ function SettingRow({
   return (
     <div
       className={cn(
-        "flex items-start gap-4 px-5 py-3 transition-colors",
+        "flex flex-col gap-2 px-4 py-3 transition-colors md:flex-row md:items-start md:gap-4 md:px-5",
         item.is_override && "bg-[var(--color-primary-soft)]",
       )}
     >
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <code className="text-xs font-medium text-[var(--color-foreground)]">
+          <code className="break-all text-xs font-medium text-[var(--color-foreground)]">
             {item.key}
           </code>
           <SettingHelp short={helpText ?? ""} />
@@ -469,15 +458,15 @@ function SettingRow({
           </p>
         )}
         {!item.is_override && defaultValue !== "" && (
-          <p className="mt-1 text-[10px] text-[var(--color-subtle)]">
+          <p className="mt-1 break-all text-[10px] text-[var(--color-subtle)]">
             Valor por defecto:{" "}
             <span className="font-mono">{defaultValue}</span>
           </p>
         )}
       </div>
 
-      <div className="flex shrink-0 items-center gap-1.5">
-        <div className="w-56">
+      <div className="flex w-full shrink-0 items-center gap-1.5 md:w-auto">
+        <div className="flex-1 md:w-56 md:flex-none">
           {isBool ? (
             <select
               value={draft}
@@ -496,7 +485,7 @@ function SettingRow({
           )}
         </div>
 
-        <div className="flex w-16 justify-end gap-1">
+        <div className="flex w-16 shrink-0 justify-end gap-1">
           {dirty && (
             <Button
               size="sm"
@@ -526,9 +515,6 @@ function SettingRow({
   );
 }
 
-// --------------------------------------------------------------------------- //
-// Helpers
-// --------------------------------------------------------------------------- //
 function formatValue(v: unknown, isBool: boolean, isNum: boolean): string {
   if (v === null || v === undefined) return "";
   if (isBool || isNum) return String(v);
