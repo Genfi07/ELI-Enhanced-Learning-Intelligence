@@ -12,7 +12,11 @@ import {
 import { useNewChatStore } from "@/lib/stores/new-chat-store";
 import { useConfirm } from "@/lib/stores/confirm-store";
 
-export function ConversationList() {
+interface ConversationListProps {
+  onNavigate?: () => void;
+}
+
+export function ConversationList({ onNavigate }: ConversationListProps) {
   const pathname = usePathname();
   const router = useRouter();
   const bumpNewChat = useNewChatStore((s) => s.bump);
@@ -32,7 +36,8 @@ export function ConversationList() {
     e.stopPropagation();
     const ok = await confirm({
       title: "Eliminar conversación",
-      message: "Se borrará el historial de esta conversación. Las memorias creadas se conservan.",
+      message:
+        "Se borrará el historial de esta conversación. Las memorias creadas se conservan.",
       confirmText: "Eliminar",
       cancelText: "Cancelar",
       variant: "danger",
@@ -87,6 +92,7 @@ export function ConversationList() {
             <Link
               key={c.id}
               href={`/chat/${c.id}`}
+              onClick={() => onNavigate?.()}
               className={cn(
                 "group flex items-center justify-between gap-2 rounded-md px-2 py-1.5 transition-colors",
                 isActive
@@ -103,7 +109,7 @@ export function ConversationList() {
               <button
                 type="button"
                 onClick={(e) => handleDelete(e, c.id)}
-                className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+                className="shrink-0 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
                 aria-label="Eliminar conversación"
               >
                 <Trash2 className="h-3.5 w-3.5 text-[var(--color-subtle)] hover:text-[var(--color-danger)]" />

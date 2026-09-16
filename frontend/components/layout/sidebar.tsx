@@ -19,6 +19,7 @@ import { useNewChatStore } from "@/lib/stores/new-chat-store";
 
 interface SidebarProps {
   user: User;
+  onNavigate?: () => void;
 }
 
 interface NavItem {
@@ -38,7 +39,7 @@ const NAV: NavItem[] = [
   { href: "/settings", label: "Ajustes", icon: Settings },
 ];
 
-export function Sidebar({ user }: SidebarProps) {
+export function Sidebar({ user, onNavigate }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const bumpNewChat = useNewChatStore((s) => s.bump);
@@ -47,12 +48,24 @@ export function Sidebar({ user }: SidebarProps) {
   function handleNewChat() {
     bumpNewChat();
     router.push("/chat");
+    onNavigate?.();
   }
 
   return (
-    <aside className="flex h-full w-64 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
+    <aside
+      className="flex h-full w-64 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]"
+      onClick={(e) => {
+        // Cierra el menú en móvil al pulsar cualquier enlace o botón dentro del sidebar
+        const target = e.target as HTMLElement;
+        if (target.closest("a, button")) onNavigate?.();
+      }}
+    >
       <div className="flex h-14 shrink-0 items-center border-b border-[var(--color-border)] px-5">
-        <Link href="/chat" className="text-lg font-semibold tracking-tight">
+        <Link
+          href="/chat"
+          className="text-lg font-semibold tracking-tight"
+          onClick={() => onNavigate?.()}
+        >
           ELI
         </Link>
       </div>
@@ -81,6 +94,7 @@ export function Sidebar({ user }: SidebarProps) {
             <Link
               key={item.href}
               href={item.href}
+              onClick={() => onNavigate?.()}
               className={cn(
                 "flex items-center gap-3 rounded-md px-3 py-1.5 text-sm transition-colors",
                 active
@@ -95,7 +109,11 @@ export function Sidebar({ user }: SidebarProps) {
         })}
       </nav>
 
-      <ConversationList />
+      {/*
+        ConversationList se encarga de sus propios clics.
+        Le pasamos onNavigate para que cierre el menú al seleccionar una conversación.
+      */}
+      <ConversationList onNavigate={onNavigate} />
 
       <div className="shrink-0 border-t border-[var(--color-border)] p-3">
         <p className="px-2 text-xs text-[var(--color-subtle)]">

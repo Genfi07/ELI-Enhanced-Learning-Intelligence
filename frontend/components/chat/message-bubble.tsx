@@ -9,9 +9,7 @@ import { cn } from "@/lib/utils";
 interface MessageBubbleProps {
   role: "user" | "assistant";
   content: string;
-  /** Si true, muestra un cursor parpadeante al final (streaming en curso). */
   streaming?: boolean;
-  /** Nombre del archivo adjunto a este mensaje (solo para role=user). */
   attachmentName?: string | null;
 }
 
@@ -26,29 +24,28 @@ export function MessageBubble({
   return (
     <div
       className={cn(
-        "group flex w-full gap-3 px-4 py-4",
+        "group flex w-full gap-2 px-3 py-1.5 md:gap-3 md:px-4 md:py-3",
         isUser ? "justify-end" : "justify-start",
       )}
     >
       {!isUser && (
-        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
+        <div className="mt-0.5 hidden h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)] md:flex">
           <Bot className="h-4 w-4" />
         </div>
       )}
 
       <div
         className={cn(
-          "max-w-[min(720px,80%)] rounded-lg px-4 py-2.5 text-sm",
+          "max-w-[85%] rounded-2xl px-3.5 py-2 text-sm shadow-sm md:max-w-[min(720px,80%)] md:px-4 md:py-2.5",
           isUser
-            ? "bg-[var(--color-primary)] text-white"
-            : "bg-[var(--color-surface)] text-[var(--color-foreground)]",
+            ? "rounded-br-md bg-[var(--color-primary)] text-white"
+            : "rounded-bl-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-foreground)]",
         )}
       >
-        {/* Chip del adjunto (solo user) */}
         {isUser && attachmentName && (
           <div className="mb-2 inline-flex items-center gap-1.5 rounded bg-white/15 px-2 py-1 text-xs">
             <Paperclip className="h-3 w-3" />
-            <span className="truncate max-w-[280px]">{attachmentName}</span>
+            <span className="max-w-[280px] truncate">{attachmentName}</span>
           </div>
         )}
 
@@ -70,7 +67,7 @@ export function MessageBubble({
       </div>
 
       {isUser && (
-        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-surface-hover)] text-[var(--color-muted)]">
+        <div className="mt-0.5 hidden h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-surface-hover)] text-[var(--color-muted)] md:flex">
           <UserIcon className="h-4 w-4" />
         </div>
       )}

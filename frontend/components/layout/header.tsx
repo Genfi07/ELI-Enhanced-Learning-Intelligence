@@ -36,8 +36,8 @@ export function Header({ title, user }: HeaderProps) {
   }
 
   return (
-    <header className="flex h-14 items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-6">
-      <div className="text-sm text-[var(--color-muted)]">
+    <header className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 md:h-14 md:px-6">
+      <div className="truncate text-sm text-[var(--color-muted)]">
         {title ?? ""}
       </div>
 
