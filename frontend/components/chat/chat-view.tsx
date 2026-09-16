@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AlertCircle, Sparkles, FileText, UploadCloud } from "lucide-react";
+import Link from "next/link";
+import {
+  AlertCircle,
+  Sparkles,
+  FileText,
+  UploadCloud,
+  Brain,
+  Wrench,
+} from "lucide-react";
 import { MessageBubble } from "./message-bubble";
 import { ChatInput } from "./chat-input";
 import { useAttachment } from "@/lib/hooks/use-attachment";
@@ -114,6 +122,16 @@ export function ChatView({ chat, title }: ChatViewProps) {
 
   const isEmpty = state.messages.length === 0;
 
+  // Cuando el backend crea una nueva conversación, actualizamos la URL
+  // sin remontar el componente para no perder el estado local.
+  useEffect(() => {
+    if (!chat.conversationId) return;
+    if (title) return;
+    const target = `/chat/${chat.conversationId}`;
+    if (window.location.pathname === target) return;
+    window.history.replaceState(null, "", target);
+  }, [chat.conversationId, title]);
+
   return (
     <div
       onDragEnter={onDragEnter}
@@ -208,25 +226,63 @@ export function ChatView({ chat, title }: ChatViewProps) {
 
 function EmptyState() {
   return (
-    <div className="flex h-full items-center justify-center p-6 md:p-8">
-      <div className="max-w-md text-center">
-        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)] md:h-12 md:w-12">
-          <Sparkles className="h-6 w-6 md:h-5 md:w-5" />
+    <div className="flex h-full flex-col justify-end px-4 pb-2 md:justify-center md:pb-0">
+      <div className="mx-auto w-full max-w-md space-y-2">
+        <div className="mb-6 flex flex-col items-center text-center md:items-start md:text-left">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)] md:h-12 md:w-12">
+            <Sparkles className="h-6 w-6 md:h-5 md:w-5" />
+          </div>
+          <h2 className="mt-4 text-xl font-semibold">¿En qué te ayudo hoy?</h2>
         </div>
-        <h2 className="mt-4 text-xl font-semibold">¿En qué te ayudo hoy?</h2>
-        <p className="mt-2 text-sm text-[var(--color-muted)]">
-          ELI recuerda lo que le cuentas, lee tus documentos, planifica tareas
-          complejas y usa herramientas cuando hace falta.
-        </p>
-        <p className="mt-3 text-xs text-[var(--color-subtle)]">
-          <span className="hidden md:inline">
-            Arrastra un PDF, Word, Excel o imagen al chat, o pégalo con Ctrl+V.
-          </span>
-          <span className="md:hidden">
-            Toca el clip 📎 para adjuntar un PDF, Word, Excel o imagen.
-          </span>
-        </p>
+
+        <QuickAction
+          href="/files"
+          icon={<FileText className="h-4 w-4" />}
+          label="Subir un documento"
+          hint="PDF, Word, Excel, imagen"
+        />
+        <QuickAction
+          href="/memory"
+          icon={<Brain className="h-4 w-4" />}
+          label="Repasar mi memoria"
+          hint="Lo que ELI ya sabe de ti"
+        />
+        <QuickAction
+          href="/tools"
+          icon={<Wrench className="h-4 w-4" />}
+          label="Usar una herramienta"
+          hint="Flujos, análisis, automatizaciones"
+        />
       </div>
     </div>
+  );
+}
+
+function QuickAction({
+  href,
+  icon,
+  label,
+  hint,
+}: {
+  href: string;
+  icon: React.ReactNode;
+  label: string;
+  hint: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="flex w-full items-center gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-left transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-hover)] active:scale-[0.99]"
+    >
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
+        {icon}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-[var(--color-foreground)]">
+          {label}
+        </p>
+        <p className="truncate text-xs text-[var(--color-muted)]">{hint}</p>
+      </div>
+    </Link>
   );
 }
