@@ -11,8 +11,11 @@ import type { NextConfig } from "next";
  * En producción se reemplaza por la URL real del backend con una variable
  * de entorno. Por ahora apuntamos a localhost porque Codespaces lo proxea.
  */
-const BACKEND_URL = process.env.ELI_BACKEND_URL ?? "http://localhost:8000";
-
+const BACKEND_URL =
+  process.env.ELI_BACKEND_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  "https://eli-enhanced-learning-intelligence.onrender.com";
+  
 const nextConfig: NextConfig = {
   async rewrites() {
     return [
