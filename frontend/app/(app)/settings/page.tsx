@@ -1,72 +1,40 @@
 "use client";
 
 import { useState } from "react";
-import { User, Shield, LogOut } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import {
+  User as UserIcon,
+  Shield,
+  SlidersHorizontal,
+  Database,
+} from "lucide-react";
 import { Header } from "@/components/layout/header";
-import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/lib/hooks/use-current-user";
-import { useAuthStore } from "@/lib/stores/auth-store";
-import { apiPost } from "@/lib/api/client";
+import { AccountTab } from "@/components/settings/account-tab";
+import { SecurityTab } from "@/components/settings/security-tab";
+import { PreferencesTab } from "@/components/settings/preferences-tab";
+import { DataTab } from "@/components/settings/data-tab";
 import { cn } from "@/lib/utils";
 
-const AUTONOMY_LEVELS = [
-  {
-    level: 0,
-    title: "Solo conversación",
-    description: "ELI no ejecuta ninguna herramienta, solo responde.",
-  },
-  {
-    level: 1,
-    title: "Lectura",
-    description: "Puede consultar información sin modificar nada.",
-  },
-  {
-    level: 2,
-    title: "Herramientas internas",
-    description: "Calculadora, fecha/hora y operaciones internas seguras.",
-  },
-  {
-    level: 3,
-    title: "Acciones externas reversibles",
-    description: "Búsqueda web, descarga de URLs. Reversible.",
-  },
-  {
-    level: 4,
-    title: "Acciones sensibles",
-    description: "Requieren confirmación explícita antes de ejecutarse.",
-  },
+type TabId = "account" | "security" | "preferences" | "data";
+
+interface Tab {
+  id: TabId;
+  label: string;
+  icon: React.ElementType;
+}
+
+const TABS: Tab[] = [
+  { id: "account", label: "Cuenta", icon: UserIcon },
+  { id: "security", label: "Seguridad", icon: Shield },
+  { id: "preferences", label: "Preferencias", icon: SlidersHorizontal },
+  { id: "data", label: "Datos", icon: Database },
 ];
 
 export default function SettingsPage() {
-  const router = useRouter();
-  const queryClient = useQueryClient();
   const { data: user } = useCurrentUser();
-  const clear = useAuthStore((s) => s.clear);
-  const [loggingOut, setLoggingOut] = useState(false);
+  const [tab, setTab] = useState<TabId>("account");
 
   if (!user) return null;
-
-  // El nivel de autonomía vive en preferences, no lo devuelve UserOut.
-  // Lo mostramos como referencia según el rol (mismo cálculo que backend).
-  const defaultAutonomy =
-    user.role === "ADMIN" || user.role === "SUPER_ADMIN" ? 4 : 2;
-
-  async function onLogout() {
-    setLoggingOut(true);
-    try {
-      await apiPost("/auth/logout");
-    } catch {
-      // Ignorar
-    }
-    queryClient.clear();
-    clear();
-    toast.success("Sesión cerrada");
-    router.replace("/login");
-    router.refresh();
-  }
 
   return (
     <>
@@ -75,128 +43,41 @@ export default function SettingsPage() {
         <div className="mx-auto max-w-3xl px-6 py-8">
           <h1 className="text-2xl font-semibold tracking-tight">Ajustes</h1>
           <p className="mt-1 text-sm text-[var(--color-muted)]">
-            Tu perfil y preferencias de ELI.
+            Tu perfil, seguridad, preferencias y datos.
           </p>
 
-          {/* Perfil */}
-          <section className="mt-8">
-            <h2 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--color-subtle)]">
-              <User className="h-3 w-3" />
-              Perfil
-            </h2>
-            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
-              <div className="flex items-center gap-4">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-primary-soft)] text-base font-medium text-[var(--color-primary)]">
-                  {user.name.charAt(0).toUpperCase()}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium">{user.name}</p>
-                  <p className="truncate text-sm text-[var(--color-muted)]">
-                    {user.email}
-                  </p>
-                </div>
-                <span
+          <nav className="mt-6 flex items-center gap-1 border-b border-[var(--color-border)]">
+            {TABS.map((t) => {
+              const Icon = t.icon;
+              const active = tab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setTab(t.id)}
                   className={cn(
-                    "rounded px-2 py-0.5 text-[11px] font-medium uppercase tracking-wider",
-                    user.role === "SUPER_ADMIN"
-                      ? "bg-amber-500/10 text-amber-400"
-                      : user.role === "ADMIN"
-                        ? "bg-purple-500/10 text-purple-400"
-                        : "bg-[var(--color-surface-hover)] text-[var(--color-muted)]",
+                    "relative flex items-center gap-2 px-3 py-3 text-sm transition-colors",
+                    active
+                      ? "text-[var(--color-foreground)]"
+                      : "text-[var(--color-muted)] hover:text-[var(--color-foreground)]",
                   )}
                 >
-                  {user.role}
-                </span>
-              </div>
-            </div>
-          </section>
+                  <Icon className="h-3.5 w-3.5" />
+                  {t.label}
+                  {active && (
+                    <span className="absolute inset-x-0 -bottom-px h-0.5 bg-[var(--color-primary)]" />
+                  )}
+                </button>
+              );
+            })}
+          </nav>
 
-          {/* Autonomía */}
-          <section className="mt-8">
-            <h2 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--color-subtle)]">
-              <Shield className="h-3 w-3" />
-              Nivel de autonomía
-            </h2>
-            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
-              <p className="text-sm text-[var(--color-muted)]">
-                Qué acciones puede ejecutar ELI sin pedirte confirmación.
-                Tu nivel actual es{" "}
-                <strong className="text-[var(--color-foreground)]">
-                  {defaultAutonomy}
-                </strong>
-                .
-              </p>
-              <div className="mt-4 space-y-2">
-                {AUTONOMY_LEVELS.map((lvl) => {
-                  const active = lvl.level === defaultAutonomy;
-                  const disabled = lvl.level > defaultAutonomy;
-                  return (
-                    <div
-                      key={lvl.level}
-                      className={cn(
-                        "flex items-start gap-3 rounded-md border p-3 transition-colors",
-                        active
-                          ? "border-[var(--color-primary)] bg-[var(--color-primary-soft)]"
-                          : "border-[var(--color-border)]",
-                        disabled && "opacity-50",
-                      )}
-                    >
-                      <div
-                        className={cn(
-                          "flex h-6 w-6 shrink-0 items-center justify-center rounded text-xs font-medium",
-                          active
-                            ? "bg-[var(--color-primary)] text-white"
-                            : "bg-[var(--color-surface-hover)] text-[var(--color-muted)]",
-                        )}
-                      >
-                        {lvl.level}
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium">{lvl.title}</p>
-                        <p className="mt-0.5 text-xs text-[var(--color-muted)]">
-                          {lvl.description}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <p className="mt-4 text-xs text-[var(--color-subtle)]">
-                El nivel de autonomía lo gestiona un administrador. Pídele que
-                lo ajuste si necesitas más.
-              </p>
-            </div>
-          </section>
-
-          {/* Sesión */}
-          <section className="mt-8">
-            <h2 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--color-subtle)]">
-              <LogOut className="h-3 w-3" />
-              Sesión
-            </h2>
-            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-sm font-medium">Cerrar sesión</p>
-                  <p className="mt-0.5 text-xs text-[var(--color-muted)]">
-                    Se revocará la sesión actual en el servidor.
-                  </p>
-                </div>
-                <Button
-                  variant="secondary"
-                  onClick={onLogout}
-                  disabled={loggingOut}
-                >
-                  <LogOut className="h-3.5 w-3.5" />
-                  {loggingOut ? "Saliendo…" : "Cerrar sesión"}
-                </Button>
-              </div>
-            </div>
-          </section>
-
-          <p className="mt-12 text-center text-xs text-[var(--color-subtle)]">
-            ELI v0.1.0 · Fase 8 en construcción
-          </p>
+          <div className="mt-8">
+            {tab === "account" && <AccountTab user={user} />}
+            {tab === "security" && <SecurityTab />}
+            {tab === "preferences" && <PreferencesTab />}
+            {tab === "data" && <DataTab user={user} />}
+          </div>
         </div>
       </main>
     </>
