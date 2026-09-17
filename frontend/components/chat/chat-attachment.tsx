@@ -29,8 +29,10 @@ export function ChatAttachment({ attachment, onRemove }: ChatAttachmentProps) {
       <div
         className={cn(
           "flex h-8 w-8 shrink-0 items-center justify-center rounded-md",
-          status === "ready" && "bg-[var(--color-success)]/10 text-[var(--color-success)]",
-          status === "failed" && "bg-[var(--color-danger)]/10 text-[var(--color-danger)]",
+          status === "ready" &&
+            "bg-[var(--color-success)]/10 text-[var(--color-success)]",
+          status === "failed" &&
+            "bg-[var(--color-danger)]/10 text-[var(--color-danger)]",
           (status === "uploading" || status === "processing") &&
             "bg-[var(--color-primary-soft)] text-[var(--color-primary)]",
         )}
@@ -42,7 +44,7 @@ export function ChatAttachment({ attachment, onRemove }: ChatAttachmentProps) {
         <div className="flex items-center gap-2">
           <p className="truncate text-sm font-medium">{fileName}</p>
           <span className="shrink-0 text-[11px] text-[var(--color-subtle)]">
-            formatBytes(attachment.sizeBytes ?? 0)
+            {formatBytes(sizeBytes ?? 0)}
           </span>
         </div>
         <div className="mt-0.5 flex items-center gap-1.5 text-[11px]">

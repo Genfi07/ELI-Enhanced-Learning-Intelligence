@@ -91,7 +91,7 @@ export function useAttachment() {
       });
 
       try {
-        const doc = await apiUpload<Document>("/documents/upload", file);
+        const doc = await apiUpload<Document>("/files", file);
 
         setAttachment({
           id: tempId,
@@ -106,7 +106,7 @@ export function useAttachment() {
           stopPolling();
           pollRef.current = window.setInterval(async () => {
             try {
-              const d = await apiGet<Document>(`/documents/${doc.id}`);
+              const d = await apiGet<Document>(`/files/${doc.id}`);
               if (d.status === "READY") {
                 stopPolling();
                 setAttachment((prev) =>
