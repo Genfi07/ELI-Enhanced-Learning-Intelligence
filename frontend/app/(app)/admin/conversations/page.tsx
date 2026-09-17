@@ -22,11 +22,11 @@ export default function AdminConversationsPage() {
   return (
     <>
       <Header title="Admin · Conversaciones" user={user} />
-      <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-5xl px-3 py-6 md:px-6 md:py-8">
+      <main className="flex-1 overflow-y-auto min-h-0">
+        <div className="mx-auto w-full max-w-5xl px-3 py-6 md:px-6 md:py-8">
           {/* Cabecera + buscador */}
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-            <div>
+            <div className="min-w-0">
               <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
                 Conversaciones
               </h1>

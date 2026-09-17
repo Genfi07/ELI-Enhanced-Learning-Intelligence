@@ -30,7 +30,6 @@ export default function AppLayout({
 
   return (
     <div className="flex h-[100dvh] overflow-hidden">
-      {/* Overlay oscuro solo en móvil cuando la sidebar está abierta */}
       {sidebarOpen && (
         <div
           className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden"
@@ -38,7 +37,6 @@ export default function AppLayout({
         />
       )}
 
-      {/* Sidebar — deslizante en móvil, fija en escritorio */}
       <aside
         className={cn(
           "fixed inset-y-0 left-0 z-50 w-72 transform transition-transform duration-300 ease-in-out",
@@ -46,7 +44,6 @@ export default function AppLayout({
           sidebarOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
-        {/* Botón de cerrar (solo móvil) */}
         <button
           type="button"
           onClick={() => setSidebarOpen(false)}
@@ -59,9 +56,7 @@ export default function AppLayout({
         <Sidebar user={user} onNavigate={() => setSidebarOpen(false)} />
       </aside>
 
-      {/* Contenido principal */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Barra superior móvil con botón hamburguesa */}
+      <div className="flex flex-1 flex-col overflow-hidden min-h-0">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 md:hidden">
           <button
             type="button"
@@ -79,7 +74,9 @@ export default function AppLayout({
           </div>
         </header>
 
-        <div className="flex-1 overflow-hidden">{children}</div>
+        <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
+          {children}
+        </div>
       </div>
 
       <ConfirmDialog />

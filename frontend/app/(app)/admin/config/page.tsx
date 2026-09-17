@@ -198,11 +198,11 @@ export default function AdminConfigPage() {
   return (
     <>
       <Header title="Admin · Configuración" user={user} />
-      <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-4xl px-3 py-6 md:px-6 md:py-8">
+      <main className="flex-1 overflow-y-auto min-h-0">
+        <div className="mx-auto w-full max-w-4xl px-3 py-6 md:px-6 md:py-8">
           {/* Hero */}
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-            <div>
+            <div className="min-w-0">
               <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
                 Configuración
               </h1>
@@ -222,8 +222,8 @@ export default function AdminConfigPage() {
               </div>
             </div>
 
-            <div className="flex flex-col gap-2 md:flex-row md:items-center">
-              <div className="flex gap-2">
+            <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center">
+              <div className="flex flex-wrap gap-2">
                 <Button
                   variant="ghost"
                   size="sm"
@@ -361,7 +361,7 @@ function CategoryCard({
           >
             <Icon className="h-4 w-4" />
           </div>
-          <div>
+          <div className="min-w-0">
             <h2 className="text-sm font-semibold tracking-tight">
               {meta.label}
             </h2>
@@ -466,7 +466,7 @@ function SettingRow({
       </div>
 
       <div className="flex w-full shrink-0 items-center gap-1.5 md:w-auto">
-        <div className="flex-1 md:w-56 md:flex-none">
+        <div className="min-w-0 flex-1 md:w-56 md:flex-none">
           {isBool ? (
             <select
               value={draft}
@@ -480,7 +480,7 @@ function SettingRow({
             <Input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              className="h-8 font-mono text-xs"
+              className="h-8 w-full font-mono text-xs"
             />
           )}
         </div>
