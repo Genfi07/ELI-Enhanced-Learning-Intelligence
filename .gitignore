@@ -67,3 +67,5 @@ alembic/versions/__pycache__/
 backend/app/db/models/_
 # Archivos basura de curl/redirects
 /main
+# Excel local para pruebas
+*.xlsx
