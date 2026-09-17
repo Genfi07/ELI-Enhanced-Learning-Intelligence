@@ -270,6 +270,18 @@ def _parse_chunks_as_dataframe(chunk_texts: list[str]) -> pd.DataFrame | None:
     if not rows:
         return None
 
+    # Filtrar filas parciales (cortadas por el chunker).
+    # Una fila legítima del Excel tiene >20 columnas llenas.
+    # Las filas basura que vienen de chunks cortados tienen 2-5.
+    min_filled = max(3, int(n_cols * 0.4))
+    rows = [
+        r for r in rows
+        if sum(1 for cell in r if cell and cell.strip()) >= min_filled
+    ]
+
+    if not rows:
+        return None
+
     df = pd.DataFrame(rows, columns=header)
 
     # Deduplicar por columna TRABAJO (ID único por fila) si existe.
