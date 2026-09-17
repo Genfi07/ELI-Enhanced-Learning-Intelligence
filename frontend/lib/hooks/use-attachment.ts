@@ -96,6 +96,7 @@ export function useAttachment() {
         setAttachment({
           id: tempId,
           fileName: file.name,
+          sizeBytes: file.size,
           status: doc.status === "READY" ? "ready" : "processing",
           docId: doc.id,
           chunkCount: doc.chunk_count,

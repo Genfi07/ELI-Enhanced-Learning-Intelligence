@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { Message } from "@/lib/api/types";
 
 interface ChatState {
@@ -38,23 +39,18 @@ export function useChat(conversationId: string | null) {
     string | null
   >(conversationId);
 
+  const queryClient = useQueryClient();
   const abortRef = useRef<AbortController | null>(null);
   const tempIdsRef = useRef<{ user: string | null; assistant: string | null }>(
     { user: null, assistant: null },
   );
 
   // Sincronizar el estado interno con la prop cuando navegamos
-  // a otra conversación (o cuando pasamos de /chat a /chat/[id]).
   useEffect(() => {
     setActiveConversationId(conversationId);
   }, [conversationId]);
 
-  // Cargar mensajes desde el backend SOLO cuando cambia la prop
-  // (es decir, al navegar a una conversación existente).
-  // NO dependemos del estado interno para no interferir con el stream:
-  // cuando el backend crea una nueva conversación, el evento "meta"
-  // actualiza activeConversationId, pero los mensajes ya están en el estado
-  // local y no deben ser reemplazados.
+  // Cargar mensajes SOLO cuando cambia la prop (navegación real).
   useEffect(() => {
     if (!conversationId) return;
 
@@ -175,14 +171,19 @@ export function useChat(conversationId: string | null) {
         abortRef.current = null;
         setState((s) => ({ ...s, streaming: false }));
         tempIdsRef.current = { user: null, assistant: null };
+        // Refrescar el sidebar al terminar la respuesta (título, mensajes, etc.)
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
       }
     },
-    [activeConversationId, state.streaming],
+    [activeConversationId, state.streaming, queryClient],
   );
 
   function applyEvent(ev: ServerEvent) {
     switch (ev.type) {
       case "meta": {
+        const isNewConversation =
+          !activeConversationId || activeConversationId !== ev.conversation_id;
+
         setActiveConversationId(ev.conversation_id);
         setState((s) => ({
           ...s,
@@ -196,6 +197,12 @@ export function useChat(conversationId: string | null) {
               : m,
           ),
         }));
+
+        // Si es una conversación nueva, refrescamos el sidebar YA
+        // (para que aparezca en la lista mientras ELI responde).
+        if (isNewConversation) {
+          queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        }
         break;
       }
       case "token": {
