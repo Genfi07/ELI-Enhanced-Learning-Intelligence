@@ -43,22 +43,26 @@ export function useChat(conversationId: string | null) {
     { user: null, assistant: null },
   );
 
+  // Sincronizar el estado interno con la prop cuando navegamos
+  // a otra conversación (o cuando pasamos de /chat a /chat/[id]).
   useEffect(() => {
     setActiveConversationId(conversationId);
   }, [conversationId]);
 
-  // Cargar mensajes existentes al cambiar de conversación
+  // Cargar mensajes desde el backend SOLO cuando cambia la prop
+  // (es decir, al navegar a una conversación existente).
+  // NO dependemos del estado interno para no interferir con el stream:
+  // cuando el backend crea una nueva conversación, el evento "meta"
+  // actualiza activeConversationId, pero los mensajes ya están en el estado
+  // local y no deben ser reemplazados.
   useEffect(() => {
-    if (!activeConversationId) {
-      setState({ messages: [], streaming: false, error: null });
-      return;
-    }
+    if (!conversationId) return;
 
     let cancelled = false;
     (async () => {
       try {
         const r = await fetch(
-          `/api/v1/conversations/${activeConversationId}/messages`,
+          `/api/v1/conversations/${conversationId}/messages`,
           { credentials: "include" },
         );
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -73,7 +77,7 @@ export function useChat(conversationId: string | null) {
     return () => {
       cancelled = true;
     };
-  }, [activeConversationId]);
+  }, [conversationId]);
 
   const send = useCallback(
     async (text: string, attachedDocumentIds: string[] = []) => {
