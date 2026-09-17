@@ -207,3 +207,13 @@ body {
   animation: blink 1s step-end infinite;
   border-radius: 1px;
 }
+/* Previene scroll horizontal no deseado en móvil */
+html, body {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+/* Contenedores flex no deben desbordar a sus hijos */
+.flex > * {
+  min-width: 0;
+}

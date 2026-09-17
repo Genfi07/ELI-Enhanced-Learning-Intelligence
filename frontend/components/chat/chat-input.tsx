@@ -216,7 +216,7 @@ export function ChatInput({
         )}
       </div>
 
-      <p className="mx-auto mt-2 max-w-3xl text-center text-xs text-[var(--color-subtle)]">
+      <p className="mx-auto mt-2 hidden max-w-3xl text-center text-xs text-[var(--color-subtle)] md:block">
         Enter para enviar · Shift + Enter para nueva línea · Arrastra o pega
         archivos (Ctrl+V)
       </p>
