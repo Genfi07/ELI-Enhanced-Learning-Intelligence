@@ -263,8 +263,25 @@ def _parse_chunks_as_dataframe(chunk_texts: list[str]) -> pd.DataFrame | None:
         return None
 
     df = pd.DataFrame(rows, columns=header)
-    # Deduplicar filas exactamente idénticas (por solapamiento del chunker).
-    df = df.drop_duplicates()
+
+    # Deduplicar por columna TRABAJO (ID único por fila) si existe.
+    # Este es el ID de trabajo; dos filas con el mismo TRABAJO son la
+    # misma fila repetida por overlap del chunker.
+    trabajo_col = None
+    for c in df.columns:
+        if "trabajo" in c.lower() and "grupo" not in c.lower():
+            trabajo_col = c
+            break
+
+    if trabajo_col is not None:
+        # Excluir filas con TRABAJO vacío del dedup (pueden ser válidas).
+        non_empty = df[df[trabajo_col].astype(str).str.strip() != ""]
+        empty = df[df[trabajo_col].astype(str).str.strip() == ""]
+        non_empty = non_empty.drop_duplicates(subset=[trabajo_col])
+        df = pd.concat([non_empty, empty], ignore_index=True)
+    else:
+        df = df.drop_duplicates()
+
     return df
 
 
@@ -308,16 +325,30 @@ def _aggregate(
     series = series[series.str.lower() != col.lower()]
 
     counts = series.value_counts().sort_values(ascending=False)
+    total_unique = len(counts)
 
-    if len(counts) > 200:
-        counts = counts.head(200)
+    # Limitar el JSON a top 30 para no reventar el rate limit de Groq
+    # (8000 TPM free tier). 30 grupos son suficientes para cualquier
+    # respuesta útil; el resto se resume.
+    MAX_GROUPS_IN_RESULT = 30
+    truncated = False
+    if total_unique > MAX_GROUPS_IN_RESULT:
+        counts = counts.head(MAX_GROUPS_IN_RESULT)
+        truncated = True
 
-    return {
+    result: dict = {
         "group_by": col,
         "total_rows": int(len(df)),
-        "unique_groups": int(len(counts)),
+        "unique_groups": total_unique,
         "results": {str(k): int(v) for k, v in counts.items()},
     }
+    if truncated:
+        result["truncated"] = True
+        result["note"] = (
+            f"Mostrando top {MAX_GROUPS_IN_RESULT} de {total_unique} "
+            f"grupos únicos ordenados por conteo descendente."
+        )
+    return result
 
 
 # --------------------------------------------------------------------------- #
