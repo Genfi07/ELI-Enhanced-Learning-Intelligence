@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Menu, X } from "lucide-react";
 import { useCurrentUser } from "@/lib/hooks/use-current-user";
 import { Sidebar } from "@/components/layout/sidebar";
@@ -14,6 +14,27 @@ export default function AppLayout({
 }) {
   const { data: user, isLoading, isError } = useCurrentUser();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // iOS Safari no encoge el layout cuando aparece el teclado.
+  // Usamos visualViewport para medir la altura real visible y aplicarla
+  // como altura del contenedor principal. Así el input queda pegado al teclado.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      document.documentElement.style.setProperty(
+        "--app-height",
+        `${vv.height}px`,
+      );
+    };
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    update();
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, []);
 
   if (isLoading) {
     return (
@@ -29,7 +50,8 @@ export default function AppLayout({
   }
 
   return (
-    <div className="flex h-[100dvh] overflow-hidden">
+    <div className="flex overflow-hidden"
+      style={{ height: "var(--app-height, 100dvh)" }}>
       {sidebarOpen && (
         <div
           className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden"
