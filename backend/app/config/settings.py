@@ -104,7 +104,7 @@ class Settings(BaseSettings):
     max_context_tokens: int = 16_000
     max_response_tokens: int = 1_024
     max_tool_calls: int = 4
-    history_recent_messages: int = 20
+    history_recent_messages: int = 6
 
     # Observability
     trace_enabled: bool = True

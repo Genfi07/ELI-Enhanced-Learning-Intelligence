@@ -36,12 +36,20 @@ SYSTEM_PROMPT_ATTACHED_NOTE = (
 )
 
 SYSTEM_PROMPT_AGGREGATED_NOTE = (
-    "El bloque <aggregated_data> contiene el RESULTADO YA CALCULADO de un "
-    "análisis sobre el documento adjunto. Fue generado con pandas a partir "
-    "de las filas reales del archivo. NO necesitas volver a contar ni "
-    "recalcular: usa directamente los valores de `results` para responder. "
-    "Formatea la respuesta como una tabla clara con TODOS los grupos "
-    "listados, ordenados de mayor a menor."
+    "INSTRUCCIÓN OBLIGATORIA: responde EXCLUSIVAMENTE con la tabla "
+    "markdown. La PRIMERA línea de tu respuesta debe empezar con el "
+    "carácter '|'. PROHIBIDO escribir 'Aquí tienes', 'A continuación', "
+    "'Claro', o cualquier frase introductoria. NO expliques nada. Solo "
+    "la tabla.\n\n"
+    "El bloque <aggregated_data> contiene los valores EXACTOS que debes "
+    "usar. Formato obligatorio:\n"
+    "| Supervisor | Trabajos |\n"
+    "|---|---|\n"
+    "| valor1 | N |\n"
+    "| valor2 | M |\n"
+    "...\n\n"
+    "Incluye TODAS las filas de `results`, sin omitir ninguna. "
+    "Ordena de mayor a menor por cantidad."
 )
 
 
@@ -330,7 +338,7 @@ def _aggregate(
     # Limitar el JSON a top 30 para no reventar el rate limit de Groq
     # (8000 TPM free tier). 30 grupos son suficientes para cualquier
     # respuesta útil; el resto se resume.
-    MAX_GROUPS_IN_RESULT = 30
+    MAX_GROUPS_IN_RESULT = 20
     truncated = False
     if total_unique > MAX_GROUPS_IN_RESULT:
         counts = counts.head(MAX_GROUPS_IN_RESULT)
