@@ -1,6 +1,6 @@
 """Embeddings vía Cohere (endpoint compatible OpenAI).
 
-Modelo: embed-v4 → 1024 dims (padded a 1536).
+Modelo: embed-multilingual-v3.0 → 1024 dims (padded a 1536).
 API key: https://dashboard.cohere.com/api-keys
 Free tier: 1.000 llamadas/mes.
 
@@ -57,7 +57,7 @@ class CohereEmbeddingsProvider:
             timeout=60.0,
             max_retries=0,
         )
-        self._model = "embed-v4"
+        self._model = "embed-multilingual-v3.0"
 
     @retry(stop=stop_after_attempt(2), wait=wait_exponential(min=1.0, max=6.0))
     async def embed(self, text: str) -> list[float]:

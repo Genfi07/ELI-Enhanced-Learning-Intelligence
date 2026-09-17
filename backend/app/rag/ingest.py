@@ -52,8 +52,8 @@ SUMMARY_INPUT_MAX_CHARS = 12_000
 # Con free tier de Gemini (~15 RPM) y Voyage (~3 RPM), archivos grandes
 # revientan si se mandan muchos chunks juntos. Lotes de 10 con pausa
 # de 3.5s y retry exponencial evitan los 429 consecutivos.
-EMBED_BATCH_SIZE = 10
-EMBED_BATCH_DELAY_SECONDS = 3.5
+EMBED_BATCH_SIZE = 5
+EMBED_BATCH_DELAY_SECONDS = 5.0
 EMBED_MAX_RETRIES = 5
 EMBED_RETRY_BASE_DELAY = 2.0  # 2s, 4s, 8s, 16s, 32s
 
