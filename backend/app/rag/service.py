@@ -83,39 +83,28 @@ class KnowledgeService:
         document_ids: list[uuid.UUID],
         query: str | None = None,
     ) -> KnowledgeContext | None:
-        """Documentos adjuntos: carga prioritaria del contenido.
+        """Documentos adjuntos: carga COMPLETA del contenido.
 
-        Comportamiento:
-          - Si NO hay query (o es trivial), devuelve los primeros N chunks
-            de cada documento adjunto.
-          - Si hay query, hace una búsqueda híbrida RESTRINGIDA a esos
-            documentos (mejor relevancia).
+        Los adjuntos explícitos son el caso en el que el usuario espera
+        que ELI lea TODO el documento (contar filas, listar supervisores,
+        resumir todo). Por eso cargamos hasta MAX_ATTACHED_CHUNKS chunks,
+        no 10-20 como antes.
+
+        Antes: búsqueda semántica con top_k=10 y max_chars=6000 → ELI
+        solo veía un puñado de filas y no podía contar/agrupar bien.
+
+        Ahora: carga secuencial de hasta 200 chunks (~200k chars, ~50k
+        tokens). Cabe cómodamente en Gemini (1M tokens) y Groq (128k).
         """
         if not document_ids:
             return None
 
         store = KnowledgeStore(session, self.embeddings)
 
-        if query and query.strip():
-            # Búsqueda híbrida restringida a esos docs.
-            results = await store.search(
-                user_id,
-                query,
-                top_k=10,
-                candidate_pool=40,
-                document_ids=document_ids,
-            )
-            if not results:
-                # Fallback: si no encuentra nada relevante, devuelve el
-                # contenido completo de los adjuntos.
-                results = await store.get_chunks_for_documents(
-                    user_id, document_ids, limit_per_doc=15
-                )
-        else:
-            # Sin query: contenido completo de los adjuntos.
-            results = await store.get_chunks_for_documents(
-                user_id, document_ids, limit_per_doc=20
-            )
+        # Cargar TODOS los chunks de los adjuntos (hasta el límite).
+        results = await store.get_chunks_for_documents(
+            user_id, document_ids, limit_per_doc=MAX_ATTACHED_CHUNKS
+        )
 
         if not results:
             return None
@@ -124,8 +113,7 @@ class KnowledgeService:
             results,
             header=SYSTEM_PROMPT_ATTACHED_NOTE,
             tag="attached_documents",
-            # Presupuesto más generoso para adjuntos explícitos.
-            max_chars=6000,
+            max_chars=MAX_ATTACHED_CHARS,
         )
 
 
@@ -164,3 +152,12 @@ def _build_context(
         chunk_ids=used_ids,
         document_titles=list(seen_docs.values()),
     )
+
+
+# Límites para adjuntos explícitos en el chat.
+# El usuario espera que ELI lea el documento COMPLETO cuando lo adjunta,
+# no solo los 10-20 chunks más similares a la pregunta.
+MAX_ATTACHED_CHUNKS = 200
+# Presupuesto de contexto (~50k tokens). Cabe en Gemini (1M tokens) y
+# Groq llama-3.3-70b (128k tokens) sin problema.
+MAX_ATTACHED_CHARS = 200_000
