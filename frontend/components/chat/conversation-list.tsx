@@ -20,6 +20,7 @@ export function ConversationList({ onNavigate }: ConversationListProps) {
   const pathname = usePathname();
   const router = useRouter();
   const bumpNewChat = useNewChatStore((s) => s.bump);
+  const activeId = useNewChatStore((s) => s.activeConversationId);
   const { data: conversations, isLoading } = useConversations();
   const deleteMutation = useDeleteConversation();
   const [search, setSearch] = useState("");
@@ -52,10 +53,6 @@ export function ConversationList({ onNavigate }: ConversationListProps) {
       },
     });
   }
-
-  const activeId = pathname.startsWith("/chat/")
-    ? pathname.slice("/chat/".length)
-    : null;
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden border-t border-[var(--color-border)]">

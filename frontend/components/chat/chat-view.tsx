@@ -27,6 +27,10 @@ export function ChatView({ chat, title }: ChatViewProps) {
   const { attachment, attach, clear } = useAttachment();
 
   const consumePrompt = useNewChatStore((s) => s.consumePrompt);
+  const setActiveConversationId = useNewChatStore(
+    (s) => s.setActiveConversationId,
+  );
+
   const [initialPrompt, setInitialPrompt] = useState<string | undefined>(
     undefined,
   );
@@ -69,6 +73,12 @@ export function ChatView({ chat, title }: ChatViewProps) {
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   }, [state.messages, proactiveNotice]);
+
+  // Sincronizar el store global con el conversationId activo del hook.
+  // Así el sidebar puede marcar la conversación activa sin depender de la URL.
+  useEffect(() => {
+    setActiveConversationId(chat.conversationId);
+  }, [chat.conversationId, setActiveConversationId]);
 
   const canAcceptDrop = !attachment && !state.streaming;
 
@@ -122,27 +132,19 @@ export function ChatView({ chat, title }: ChatViewProps) {
 
   const isEmpty = state.messages.length === 0;
 
-  // Cuando el backend crea una nueva conversación, actualizamos la URL
-  // sin remontar el componente para no perder el estado local.
-  useEffect(() => {
-    if (!chat.conversationId) return;
-    if (title) return;
-    const target = `/chat/${chat.conversationId}`;
-    if (window.location.pathname === target) return;
-    window.history.replaceState(null, "", target);
-  }, [chat.conversationId, title]);
-
   return (
     <div
       onDragEnter={onDragEnter}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
-      className="relative flex flex-1 flex-col overflow-hidden"
+      className="group relative flex flex-1 flex-col overflow-hidden"
     >
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
         {isEmpty && !proactiveNotice ? (
-          <EmptyState />
+          <div className="h-full group-focus-within:hidden">
+            <EmptyState />
+          </div>
         ) : (
           <div className="mx-auto flex max-w-3xl flex-col py-2 md:py-4">
             {state.messages.map((m, i) => {
