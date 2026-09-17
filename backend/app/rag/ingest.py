@@ -6,7 +6,7 @@ Flujo completo:
   3. Escribir a archivo temporal (los extractores leen de Path).
   4. Extraer texto con el ExtractorRegistry.
   5. Chunkificar con DocumentChunker.
-  6. Embedder los chunks en batch.
+  6. Embedder los chunks EN LOTES PEQUEÑOS (respeta rate limits).
   7. Insertar chunks + actualizar contador → READY.
   8. Generar summary + topics con LLM.
   9. Borrar el archivo físico (archivo original ya no se guarda).
@@ -47,6 +47,13 @@ class IngestionError(RuntimeError):
 
 # Máximo de caracteres del documento que enviamos al LLM para resumir.
 SUMMARY_INPUT_MAX_CHARS = 12_000
+
+# Configuración del batching de embeddings.
+# Con free tier de Gemini (~15 RPM) y Voyage (~3 RPM), 179 chunks en
+# una sola llamada da 429. Dividimos en lotes de 10 con pausa + retry.
+EMBED_BATCH_SIZE = 10
+EMBED_BATCH_DELAY_SECONDS = 1.2
+EMBED_MAX_RETRIES = 5
 
 
 SUMMARY_PROMPT = """\
@@ -165,9 +172,10 @@ class DocumentIngestor:
             if not chunks:
                 raise IngestionError("el documento no produjo chunks")
 
-            # 4. Embeddings en batch
+            # 4. Embeddings EN LOTES para respetar rate limits.
             texts = [c.text for c in chunks]
-            vectors = await self.embeddings.embed_batch(texts)
+            vectors = await self._embed_in_batches(texts, document_id)
+
             if len(vectors) != len(texts):
                 raise IngestionError(
                     f"embeddings devolvió {len(vectors)} vectores para {len(texts)} chunks"
@@ -247,6 +255,70 @@ class DocumentIngestor:
                     pass
 
     # ------------------------------------------------------------------ #
+    # Embeddings en lotes
+    # ------------------------------------------------------------------ #
+    async def _embed_in_batches(
+        self,
+        texts: list[str],
+        document_id: uuid.UUID,
+    ) -> list[list[float]]:
+        """Embeddea en lotes pequeños con retry exponencial.
+
+        Motivo: enviar 100+ chunks en una sola llamada revienta el rate
+        limit de los proveedores free tier (Gemini ~15 RPM, Voyage ~3 RPM)
+        y todo el pipeline falla con 429.
+        """
+        vectors: list[list[float]] = []
+        total = len(texts)
+        total_batches = (total + EMBED_BATCH_SIZE - 1) // EMBED_BATCH_SIZE
+
+        for i in range(0, total, EMBED_BATCH_SIZE):
+            batch = texts[i : i + EMBED_BATCH_SIZE]
+            batch_num = (i // EMBED_BATCH_SIZE) + 1
+
+            # Retry con backoff exponencial por lote
+            for attempt in range(EMBED_MAX_RETRIES):
+                try:
+                    batch_vectors = await self.embeddings.embed_batch(batch)
+                    if len(batch_vectors) != len(batch):
+                        raise IngestionError(
+                            f"embeddings devolvió {len(batch_vectors)} vectores "
+                            f"para {len(batch)} chunks en lote {batch_num}"
+                        )
+                    vectors.extend(batch_vectors)
+                    log.info(
+                        "ingest_embed_batch_ok",
+                        document_id=str(document_id),
+                        batch=batch_num,
+                        total=total_batches,
+                        size=len(batch),
+                    )
+                    break
+                except Exception as exc:
+                    if attempt == EMBED_MAX_RETRIES - 1:
+                        raise IngestionError(
+                            f"embeddings falló tras {EMBED_MAX_RETRIES} intentos "
+                            f"en lote {batch_num}/{total_batches}: {str(exc)[:200]}"
+                        ) from exc
+                    # Backoff: 1.5s, 3s, 6s, 12s, 24s
+                    wait = (2 ** attempt) * 1.5
+                    log.warning(
+                        "ingest_embed_retry",
+                        document_id=str(document_id),
+                        batch=batch_num,
+                        attempt=attempt + 1,
+                        wait_seconds=wait,
+                        error=str(exc)[:200],
+                    )
+                    await asyncio.sleep(wait)
+
+            # Pausa entre lotes (no después del último)
+            if i + EMBED_BATCH_SIZE < total:
+                await asyncio.sleep(EMBED_BATCH_DELAY_SECONDS)
+
+        return vectors
+
+    # ------------------------------------------------------------------ #
     # Summary + topics
     # ------------------------------------------------------------------ #
     async def _generate_summary_and_topics(
@@ -265,7 +337,7 @@ class DocumentIngestor:
                     LLMMessage(role="user", content=combined),
                 ],
                 temperature=0.2,
-                max_tokens=400,
+                max_tokens=800,
                 response_format={"type": "json_object"},
             )
             parsed = _extract_json(response.text or "")
