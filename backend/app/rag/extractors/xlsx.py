@@ -1,14 +1,14 @@
 """Extractor de XLSX con openpyxl.
 
-Política:
-  - Cada hoja se divide en BLOQUES de N filas (ROWS_PER_PAGE).
-  - Cada bloque se emite como una ExtractedPage independiente.
-  - El header de columnas se repite al inicio de cada bloque para que el
-    chunker y el LLM sepan qué significa cada columna.
-  - Solo valores con `data_only=True` (valores calculados, no fórmulas).
-  - Las hojas vacías se omiten.
-  - Cortamos a un máximo de filas por hoja para no explotar con Excels
-    gigantes. Configurable.
+Notas críticas:
+  - Usamos `read_only=False` porque con `read_only=True` openpyxl sólo
+    devuelve la primera fila cuando el Excel tiene celdas combinadas o
+    filas con estructuras irregulares (bug conocido).
+  - El header NO es siempre la primera fila: puede haber filas de
+    "Filtros aplicados: ..." antes. Detectamos el header como la fila
+    con más celdas no vacías dentro de las primeras MAX_HEADER_SCAN filas.
+  - Cada hoja se divide en BLOQUES de ROWS_PER_PAGE filas de datos.
+  - El header se repite al inicio de cada bloque.
 """
 from __future__ import annotations
 
@@ -21,20 +21,22 @@ from app.rag.extractors.base import ExtractedPage, ExtractionError
 
 log = get_logger(__name__)
 
-# Límite defensivo: XLSX gigantes se truncan. Ajustable.
 MAX_ROWS_PER_SHEET = 5_000
 MAX_COLS_PER_ROW = 50
 
-# Filas por bloque. Cada bloque se convierte en un ExtractedPage.
-# 50 filas × ~250 chars/fila ≈ 12.500 chars → ~5 chunks de 2.400 chars.
+# Filas por bloque (antes de añadir el header).
 ROWS_PER_PAGE = 50
+
+# Cuántas filas iniciales inspeccionamos para detectar el header.
+# El header suele estar en las primeras 5 filas de un Excel con metadatos.
+MAX_HEADER_SCAN = 5
 
 
 class XlsxExtractor:
     name = "xlsx"
     supported_mimes = (
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "application/vnd.ms-excel",  # legacy .xls (openpyxl no lo abre; fallará)
+        "application/vnd.ms-excel",
     )
 
     def can_handle(self, mime_type: str) -> bool:
@@ -44,7 +46,9 @@ class XlsxExtractor:
         if not path.is_file():
             raise ExtractionError(f"archivo no encontrado: {path}")
         try:
-            wb = load_workbook(str(path), data_only=True, read_only=True)
+            # read_only=False es CRÍTICO: read_only=True se atasca con celdas
+            # combinadas y sólo devuelve la primera fila.
+            wb = load_workbook(str(path), data_only=True, read_only=False)
         except Exception as exc:
             raise ExtractionError(f"XLSX inválido o corrupto: {exc}") from exc
 
@@ -59,13 +63,20 @@ class XlsxExtractor:
         return pages
 
     def _extract_sheet(self, ws, sheet_name: str) -> list[ExtractedPage]:
-        """Extrae una hoja como múltiples ExtractedPage de ROWS_PER_PAGE filas."""
-        all_rows: list[str] = []
-        header: str | None = None
-        row_count = 0
-
+        # Leer todas las filas como listas de strings normalizados.
+        raw_rows: list[list[str]] = []
         for row in ws.iter_rows(values_only=True):
-            if row_count >= MAX_ROWS_PER_SHEET:
+            cells: list[str] = []
+            for cell in row[:MAX_COLS_PER_ROW]:
+                if cell is None:
+                    cells.append("")
+                else:
+                    # Normalizar saltos internos
+                    cells.append(
+                        str(cell).replace("\n", " ").replace("\t", " ").strip()
+                    )
+            raw_rows.append(cells)
+            if len(raw_rows) >= MAX_ROWS_PER_SHEET + MAX_HEADER_SCAN:
                 log.info(
                     "xlsx_sheet_truncated",
                     sheet=sheet_name,
@@ -73,51 +84,42 @@ class XlsxExtractor:
                 )
                 break
 
-            cells = []
-            for cell in row[:MAX_COLS_PER_ROW]:
-                if cell is None:
-                    cells.append("")
-                else:
-                    # Normalizar saltos internos para no romper el chunker
-                    cells.append(
-                        str(cell).replace("\n", " ").replace("\t", " ").strip()
-                    )
-
-            # Saltar filas completamente vacías
-            if not any(c for c in cells):
-                continue
-
-            row_text = "\t".join(cells)
-
-            # La primera fila no vacía se considera el header de columnas.
-            if header is None:
-                header = row_text
-                row_count += 1
-                continue
-
-            all_rows.append(row_text)
-            row_count += 1
-
-        if not all_rows:
-            # Hoja sin datos, solo header o vacía
-            if header:
-                return [
-                    ExtractedPage(
-                        text=header,
-                        meta={"sheet": sheet_name, "rows": 0, "block": 0},
-                    )
-                ]
+        if not raw_rows:
             return []
 
-        # Emitir bloques de ROWS_PER_PAGE, repitiendo el header
-        pages: list[ExtractedPage] = []
-        total_data_rows = len(all_rows)
+        # Detectar el header: la fila con MÁS celdas no vacías en las
+        # primeras MAX_HEADER_SCAN filas.
+        header_idx = 0
+        best_count = -1
+        for i, row in enumerate(raw_rows[:MAX_HEADER_SCAN]):
+            non_empty = sum(1 for c in row if c)
+            if non_empty > best_count:
+                best_count = non_empty
+                header_idx = i
 
-        for block_idx, start in enumerate(range(0, total_data_rows, ROWS_PER_PAGE)):
-            block = all_rows[start : start + ROWS_PER_PAGE]
-            text_lines = [header] if header else []
-            text_lines.extend(block)
-            text = "\n".join(text_lines)
+        header_row = raw_rows[header_idx]
+        header_text = "\t".join(header_row)
+
+        # Filas de datos = todo lo que viene después del header y no está vacío.
+        data_rows: list[str] = []
+        for row in raw_rows[header_idx + 1 :]:
+            if any(c for c in row):
+                data_rows.append("\t".join(row))
+
+        if not data_rows:
+            # Solo header, sin datos
+            return [
+                ExtractedPage(
+                    text=header_text,
+                    meta={"sheet": sheet_name, "rows": 0, "block": 0},
+                )
+            ]
+
+        # Emitir bloques de ROWS_PER_PAGE, con header repetido.
+        pages: list[ExtractedPage] = []
+        for block_idx, start in enumerate(range(0, len(data_rows), ROWS_PER_PAGE)):
+            block = data_rows[start : start + ROWS_PER_PAGE]
+            text = "\n".join([header_text] + block)
             pages.append(
                 ExtractedPage(
                     text=text,
@@ -127,6 +129,7 @@ class XlsxExtractor:
                         "block": block_idx,
                         "row_start": start + 1,
                         "row_end": start + len(block),
+                        "header_row_index": header_idx,
                     },
                 )
             )
@@ -134,7 +137,8 @@ class XlsxExtractor:
         log.info(
             "xlsx_extracted",
             sheet=sheet_name,
-            rows=total_data_rows,
+            rows=len(data_rows),
             blocks=len(pages),
+            header_row_index=header_idx,
         )
         return pages
