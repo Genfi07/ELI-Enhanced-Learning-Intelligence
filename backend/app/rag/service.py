@@ -1,19 +1,6 @@
 """KnowledgeService: recuperación RAG en el turno.
 
 Análogo al MemoryService pero para documentos.
-
-Tres modos:
-  - `retrieve_context`: búsqueda híbrida estándar. Devuelve los chunks
-    más relevantes a la query del usuario.
-  - `retrieve_attached_context`: cuando el usuario adjunta documentos
-    explícitamente al chat, cargamos su contenido prioritario.
-
-Novedad importante:
-  Cuando la query del usuario es una PREGUNTA DE AGREGACIÓN sobre una
-  tabla (ej: "¿cuántos trabajos tiene cada supervisor?"), NO mandamos
-  los 200k chars al LLM. En su lugar parseamos los chunks como TSV con
-  pandas, agrupamos y contamos, y devolvemos un JSON pequeño (~2 KB).
-  Esto evita el "Fallo del proveedor LLM" por exceso de contexto.
 """
 from __future__ import annotations
 
@@ -51,9 +38,10 @@ SYSTEM_PROMPT_ATTACHED_NOTE = (
 SYSTEM_PROMPT_AGGREGATED_NOTE = (
     "El bloque <aggregated_data> contiene el RESULTADO YA CALCULADO de un "
     "análisis sobre el documento adjunto. Fue generado con pandas a partir "
-    "de las filas reales. NO necesitas volver a contar ni recalcular: "
-    "usa directamente los valores de `results` para responder. Formatea "
-    "la respuesta como una tabla clara con TODOS los grupos listados."
+    "de las filas reales del archivo. NO necesitas volver a contar ni "
+    "recalcular: usa directamente los valores de `results` para responder. "
+    "Formatea la respuesta como una tabla clara con TODOS los grupos "
+    "listados, ordenados de mayor a menor."
 )
 
 
@@ -74,7 +62,6 @@ class KnowledgeService:
         user_id: uuid.UUID,
         query: str,
     ) -> KnowledgeContext | None:
-        """RAG normal: busca chunks relevantes sobre todos los docs activos."""
         settings = get_settings()
         if not settings.rag_enabled:
             return None
@@ -100,15 +87,6 @@ class KnowledgeService:
         document_ids: list[uuid.UUID],
         query: str | None = None,
     ) -> KnowledgeContext | None:
-        """Documentos adjuntos: agregación automática o carga completa.
-
-        Flujo:
-          1. Cargar los chunks del adjunto.
-          2. Si la query parece una pregunta de AGREGACIÓN sobre una tabla
-             ("cuántos X por Y"), parsear los chunks con pandas, agrupar y
-             devolver un JSON pequeño.
-          3. Si no, devolver el contenido completo (hasta el límite).
-        """
         if not document_ids:
             return None
 
@@ -120,20 +98,13 @@ class KnowledgeService:
         if not results:
             return None
 
-        # --------------------------------------------------------------
-        # Intento de agregación automática
-        # --------------------------------------------------------------
         if query:
             intent = _detect_aggregation_intent(query)
             if intent is not None:
                 try:
                     aggregated = _try_aggregate(results, intent)
                 except Exception as exc:
-                    log.warning(
-                        "aggregation_failed",
-                        query=query,
-                        error=str(exc),
-                    )
+                    log.warning("aggregation_failed", query=query, error=str(exc))
                     aggregated = None
 
                 if aggregated is not None:
@@ -143,9 +114,7 @@ class KnowledgeService:
                         total_rows=aggregated.get("total_rows"),
                         unique_groups=aggregated.get("unique_groups"),
                     )
-                    payload = json.dumps(
-                        aggregated, ensure_ascii=False, indent=2
-                    )
+                    payload = json.dumps(aggregated, ensure_ascii=False, indent=2)
                     text = (
                         SYSTEM_PROMPT_AGGREGATED_NOTE
                         + "\n\n<aggregated_data>\n"
@@ -155,14 +124,9 @@ class KnowledgeService:
                     return KnowledgeContext(
                         text=text,
                         chunk_ids=[r.chunk_id for r in results],
-                        document_titles=list(
-                            {r.document_title for r in results}
-                        ),
+                        document_titles=list({r.document_title for r in results}),
                     )
 
-        # --------------------------------------------------------------
-        # Fallback: contenido completo (como antes)
-        # --------------------------------------------------------------
         return _build_context(
             results,
             header=SYSTEM_PROMPT_ATTACHED_NOTE,
@@ -172,10 +136,9 @@ class KnowledgeService:
 
 
 # --------------------------------------------------------------------------- #
-# Detección de intención de agregación
+# Detección de intención
 # --------------------------------------------------------------------------- #
 
-# Palabras que indican claramente una pregunta de agregación.
 _AGGREGATION_HINT = re.compile(
     r"\b("
     r"cu[aá]nt[oa]s?|"
@@ -190,18 +153,12 @@ _AGGREGATION_HINT = re.compile(
     re.IGNORECASE,
 )
 
-# Mapeo de palabras en la query → nombre de columna preferido del Excel.
-# El matching es laxo: si la query menciona "supervisor", buscamos la
-# columna que contenga "supervisor" en su nombre.
 _GROUP_BY_HINTS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bsupervisor(?:es)?\b", re.I), "NOMBRE SUPERVISOR"),
     (re.compile(r"\bgerente(?:s)?\b", re.I), "NOMBRE_GERENTE"),
     (re.compile(r"\bprovincias?\b", re.I), "PROVINCIA"),
     (re.compile(r"\bdistritos?\b", re.I), "DISTRITO"),
-    (
-        re.compile(r"\bgrupo(?:s)?\s+(?:de\s+)?trabajo\b", re.I),
-        "GRUPO_TRABAJO",
-    ),
+    (re.compile(r"\bgrupo(?:s)?\s+(?:de\s+)?trabajo\b", re.I), "GRUPO_TRABAJO"),
     (re.compile(r"\bestados?\b", re.I), "ESTADO"),
     (re.compile(r"\bcompan[ií]as?\b", re.I), "COMPANIA"),
     (re.compile(r"\bciudades?\b", re.I), "CIUDAD"),
@@ -209,22 +166,11 @@ _GROUP_BY_HINTS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\btipos?\s+(?:de\s+)?cliente\b", re.I), "TIPO_CLNT"),
     (re.compile(r"\btecnolog[ií]as?\b", re.I), "TECNOLOGÍA"),
     (re.compile(r"\bt[eé]cnicos?\b", re.I), "NOMBRE TÉCNICO"),
-    (
-        re.compile(r"\bclasificaci[oó]n(?:\s+prioridad)?\b", re.I),
-        "CLASIFICACION",
-    ),
+    (re.compile(r"\bclasificaci[oó]n(?:\s+prioridad)?\b", re.I), "CLASIFICACION"),
 ]
 
 
 def _detect_aggregation_intent(query: str) -> dict | None:
-    """Devuelve {'group_by': ..., 'aggregation': 'count'} si aplica.
-
-    Heurística simple:
-      - La query debe contener una palabra de agregación ("cuántos",
-        "total de", "por", etc.).
-      - La query debe mencionar una dimensión reconocible (supervisor,
-        provincia, etc.).
-    """
     if not query or not query.strip():
         return None
     if not _AGGREGATION_HINT.search(query):
@@ -238,12 +184,11 @@ def _detect_aggregation_intent(query: str) -> dict | None:
 
 
 # --------------------------------------------------------------------------- #
-# Agregación con pandas
+# Agregación robusta
 # --------------------------------------------------------------------------- #
 
 
 def _try_aggregate(results, intent: dict) -> dict | None:
-    """Parsea los chunks como TSV y devuelve la agregación en JSON."""
     chunk_texts = [r.content for r in results if r.content]
     if not chunk_texts:
         return None
@@ -256,79 +201,86 @@ def _try_aggregate(results, intent: dict) -> dict | None:
 
 
 def _parse_chunks_as_dataframe(chunk_texts: list[str]) -> pd.DataFrame | None:
-    """Parsea los chunks de un Excel como un DataFrame.
+    """Parsea los chunks como DataFrame.
 
-    Formato esperado: cada chunk empieza con una línea de header (celdas
-    separadas por tabulador) seguida de N filas de datos, también con
-    tabuladores. El header puede repetirse en cada chunk (lo emite el
-    XlsxExtractor así a propósito).
+    Estrategia robusta: como el chunker puede cortar el texto en cualquier
+    punto, NO asumimos que cada chunk empieza con el header. En su lugar:
+      1. Concatenamos TODOS los chunks.
+      2. Buscamos la línea con más tabuladores → ese es el header.
+      3. Recogemos TODAS las líneas que tengan al menos 3 tabuladores y
+         no sean el header, como filas de datos.
+      4. Deduplicamos filas idénticas (por si el solapamiento del chunker
+         repite filas).
     """
+    all_text = "\n".join(chunk_texts)
+    lines = all_text.split("\n")
+
+    # 1. Encontrar el header.
     header: list[str] | None = None
+    max_tabs = 0
+    for line in lines[:2000]:
+        tabs = line.count("\t")
+        if tabs > max_tabs and tabs >= 3:
+            max_tabs = tabs
+            header = [c.strip() for c in line.split("\t")]
+
+    if header is None or len(header) < 3:
+        return None
+
+    n_cols = len(header)
+    header_set = set(c for c in header if c)
+
+    # 2. Recoger filas.
     rows: list[list[str]] = []
-
-    for text in chunk_texts:
-        lines = text.strip().split("\n")
-        if not lines:
+    for line in lines:
+        if not line.strip():
+            continue
+        tabs = line.count("\t")
+        if tabs < 3:
             continue
 
-        first_line = lines[0]
-        # Solo tratamos como tabla si tiene al menos un tabulador.
-        if "\t" not in first_line:
+        cells = line.split("\t")
+        # Normalizar longitud.
+        if len(cells) < n_cols:
+            cells = cells + [""] * (n_cols - len(cells))
+        elif len(cells) > n_cols:
+            cells = cells[:n_cols]
+        cells = [c.strip() for c in cells]
+
+        # Saltar la línea del header (aparece múltiples veces).
+        if cells == header:
             continue
 
-        candidate_header = [c.strip() for c in first_line.split("\t")]
+        # Saltar filas donde todas las celdas coinciden con el header
+        # (variante de header con distinto espaciado).
+        non_empty = [c for c in cells if c]
+        if non_empty and all(c in header_set for c in non_empty):
+            continue
 
-        # El header real es el que se repite más. Si ya tenemos uno y el
-        # candidato coincide (o es similar), usamos el primero.
-        if header is None:
-            header = candidate_header
-        else:
-            # Si el candidato NO coincide con nuestro header, saltamos el
-            # chunk (probablemente es basura o un "Filtros aplicados:...").
-            if len(candidate_header) != len(header):
-                continue
+        rows.append(cells)
 
-        for line in lines[1:]:
-            if not line.strip():
-                continue
-            cells = line.split("\t")
-            # Pad/truncate a la longitud del header.
-            if len(cells) < len(header):
-                cells = cells + [""] * (len(header) - len(cells))
-            elif len(cells) > len(header):
-                cells = cells[: len(header)]
-            # Saltamos filas completamente vacías.
-            if not any(c.strip() for c in cells):
-                continue
-            rows.append(cells)
-
-    if header is None or not rows:
+    if not rows:
         return None
 
     df = pd.DataFrame(rows, columns=header)
-    # Dropear duplicados exactos (por si el header se coló como fila).
+    # Deduplicar filas exactamente idénticas (por solapamiento del chunker).
     df = df.drop_duplicates()
     return df
 
 
 def _normalize_name(s: str) -> str:
-    """Normaliza un nombre de columna para matching laxo."""
     return re.sub(r"[^a-z0-9]", "", s.lower())
 
 
 def _find_column(df: pd.DataFrame, preferred: str) -> str | None:
-    """Encuentra la columna real del df que mejor coincide con `preferred`."""
     target = _normalize_name(preferred)
-    # 1) Match exacto normalizado
     for c in df.columns:
         if _normalize_name(c) == target:
             return c
-    # 2) Match parcial: la columna contiene el target o viceversa
     for c in df.columns:
         cn = _normalize_name(c)
         if target and (target in cn or cn in target):
             return c
-    # 3) Match por última palabra (ej: "supervisor" → "NOMBRE SUPERVISOR")
     keywords = [w for w in target.split() if w]
     for c in df.columns:
         cn = _normalize_name(c)
@@ -352,16 +304,13 @@ def _aggregate(
         }
 
     series = df[col].fillna("(vacío)").astype(str).str.strip()
-    # Excluir celdas vacías del conteo.
     series = series[series != ""]
+    series = series[series.str.lower() != col.lower()]
 
-    counts = series.value_counts()
-    # Orden descendente por frecuencia.
-    counts = counts.sort_values(ascending=False)
+    counts = series.value_counts().sort_values(ascending=False)
 
-    # Limitar a los 100 grupos más frecuentes para no inflar el contexto.
-    if len(counts) > 100:
-        counts = counts.head(100)
+    if len(counts) > 200:
+        counts = counts.head(200)
 
     return {
         "group_by": col,
@@ -372,7 +321,7 @@ def _aggregate(
 
 
 # --------------------------------------------------------------------------- #
-# Construcción del contexto textual (fallback)
+# Construcción del contexto textual
 # --------------------------------------------------------------------------- #
 
 
@@ -413,6 +362,5 @@ def _build_context(
     )
 
 
-# Límites para adjuntos explícitos en el chat.
 MAX_ATTACHED_CHUNKS = 200
 MAX_ATTACHED_CHARS = 40_000

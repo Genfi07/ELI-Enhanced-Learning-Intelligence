@@ -2,11 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, apiUpload } from "@/lib/api/client";
+import { HttpError } from "@/lib/api/client";
 import type { Document } from "@/lib/api/types";
 
-// --------------------------------------------------------------------------- //
-// MIME types aceptados
-// --------------------------------------------------------------------------- //
 export const ACCEPTED_MIMES = [
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -25,9 +23,6 @@ export const ACCEPTED_MIMES = [
 export const ACCEPTED_ATTR =
   ".pdf,.docx,.xlsx,.txt,.md,.csv,.json,.png,.jpg,.jpeg,.webp,.gif,.heic";
 
-// --------------------------------------------------------------------------- //
-// Tipos
-// --------------------------------------------------------------------------- //
 export type AttachmentStatus =
   | "uploading"
   | "processing"
@@ -44,18 +39,20 @@ export interface Attachment {
   error?: string;
 }
 
-// --------------------------------------------------------------------------- //
-// Hook
-// --------------------------------------------------------------------------- //
+const POLL_INTERVAL_MS = 1500;
+const POLL_MAX_FAILURES = 10; // tolera 10 fallos seguidos antes de rendirse
+
 export function useAttachment() {
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const pollRef = useRef<number | null>(null);
+  const failuresRef = useRef(0);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current !== null) {
       window.clearInterval(pollRef.current);
       pollRef.current = null;
     }
+    failuresRef.current = 0;
   }, []);
 
   const clear = useCallback(() => {
@@ -63,15 +60,12 @@ export function useAttachment() {
     setAttachment(null);
   }, [stopPolling]);
 
-  // Cleanup al desmontar
   useEffect(() => stopPolling, [stopPolling]);
 
   const attach = useCallback(
     async (file: File) => {
-      // Solo un archivo a la vez
       if (attachment) return;
 
-      // Validar mime
       if (!ACCEPTED_MIMES.includes(file.type)) {
         setAttachment({
           id: "err",
@@ -83,7 +77,7 @@ export function useAttachment() {
       }
 
       const tempId = `${Date.now()}-${file.name}`;
-           setAttachment({
+      setAttachment({
         id: tempId,
         fileName: file.name,
         sizeBytes: file.size,
@@ -102,21 +96,20 @@ export function useAttachment() {
           chunkCount: doc.chunk_count,
         });
 
-        // Si no está listo todavía, hacemos polling cada 1.5s
         if (doc.status !== "READY" && doc.status !== "FAILED") {
           stopPolling();
+          failuresRef.current = 0;
+
           pollRef.current = window.setInterval(async () => {
             try {
               const d = await apiGet<Document>(`/files/${doc.id}`);
+              failuresRef.current = 0; // reset en éxito
+
               if (d.status === "READY") {
                 stopPolling();
                 setAttachment((prev) =>
                   prev
-                    ? {
-                        ...prev,
-                        status: "ready",
-                        chunkCount: d.chunk_count,
-                      }
+                    ? { ...prev, status: "ready", chunkCount: d.chunk_count }
                     : null,
                 );
               } else if (d.status === "FAILED") {
@@ -126,15 +119,41 @@ export function useAttachment() {
                     ? {
                         ...prev,
                         status: "failed",
-                        error: "El documento no se pudo procesar",
+                        error: d.error || "El documento no se pudo procesar",
                       }
                     : null,
                 );
               }
-            } catch {
-              stopPolling();
+            } catch (err) {
+              failuresRef.current += 1;
+
+              // 404 → el documento no existe, detener.
+              if (err instanceof HttpError && err.status === 404) {
+                stopPolling();
+                setAttachment((prev) =>
+                  prev
+                    ? { ...prev, status: "failed", error: "Documento no encontrado" }
+                    : null,
+                );
+                return;
+              }
+
+              // Cualquier otro error (429, 500, red, cold start) →
+              // seguir intentando hasta POLL_MAX_FAILURES.
+              if (failuresRef.current >= POLL_MAX_FAILURES) {
+                stopPolling();
+                setAttachment((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        status: "failed",
+                        error: "No se pudo verificar el estado del archivo",
+                      }
+                    : null,
+                );
+              }
             }
-          }, 1500);
+          }, POLL_INTERVAL_MS);
         }
       } catch (err) {
         setAttachment({
