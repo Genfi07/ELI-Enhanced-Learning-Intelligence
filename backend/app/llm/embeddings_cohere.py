@@ -3,6 +3,13 @@
 Modelo: embed-v4 → 1024 dims (padded a 1536).
 API key: https://dashboard.cohere.com/api-keys
 Free tier: 1.000 llamadas/mes.
+
+NOTA CRÍTICA:
+  Cohere expone la API compatible con OpenAI en `/compatibility/v1`, NO
+  en `/v2`. El SDK de OpenAI añade `/embeddings` al `base_url`, así que
+  usar `https://api.cohere.com/v2` produce `POST /v2/embeddings` → 404.
+  La URL correcta es `https://api.cohere.com/compatibility/v1`, que
+  resuelve a `POST /compatibility/v1/embeddings` y sí funciona.
 """
 from __future__ import annotations
 
@@ -46,7 +53,7 @@ class CohereEmbeddingsProvider:
             raise RuntimeError("COHERE_API_KEY no configurada")
         self._client = AsyncOpenAI(
             api_key=key,
-            base_url="https://api.cohere.com/v2",
+            base_url="https://api.cohere.com/compatibility/v1",
             timeout=60.0,
             max_retries=0,
         )

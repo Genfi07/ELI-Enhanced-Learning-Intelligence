@@ -49,11 +49,13 @@ class IngestionError(RuntimeError):
 SUMMARY_INPUT_MAX_CHARS = 12_000
 
 # Configuración del batching de embeddings.
-# Con free tier de Gemini (~15 RPM) y Voyage (~3 RPM), 179 chunks en
-# una sola llamada da 429. Dividimos en lotes de 10 con pausa + retry.
+# Con free tier de Gemini (~15 RPM) y Voyage (~3 RPM), archivos grandes
+# revientan si se mandan muchos chunks juntos. Lotes de 10 con pausa
+# de 3.5s y retry exponencial evitan los 429 consecutivos.
 EMBED_BATCH_SIZE = 10
-EMBED_BATCH_DELAY_SECONDS = 1.2
+EMBED_BATCH_DELAY_SECONDS = 3.5
 EMBED_MAX_RETRIES = 5
+EMBED_RETRY_BASE_DELAY = 2.0  # 2s, 4s, 8s, 16s, 32s
 
 
 SUMMARY_PROMPT = """\
@@ -300,8 +302,8 @@ class DocumentIngestor:
                             f"embeddings falló tras {EMBED_MAX_RETRIES} intentos "
                             f"en lote {batch_num}/{total_batches}: {str(exc)[:200]}"
                         ) from exc
-                    # Backoff: 1.5s, 3s, 6s, 12s, 24s
-                    wait = (2 ** attempt) * 1.5
+                    # Backoff: 2s, 4s, 8s, 16s, 32s
+                    wait = (2 ** attempt) * EMBED_RETRY_BASE_DELAY
                     log.warning(
                         "ingest_embed_retry",
                         document_id=str(document_id),
