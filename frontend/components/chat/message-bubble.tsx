@@ -3,8 +3,9 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { Bot, User as UserIcon, Paperclip } from "lucide-react";
+import { User as UserIcon, Paperclip } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { EliAvatar } from "@/components/eli/eli-avatar";
 
 interface MessageBubbleProps {
   role: "user" | "assistant";
@@ -28,9 +29,10 @@ export function MessageBubble({
         isUser ? "justify-end" : "justify-start",
       )}
     >
+      {/* Avatar ELI — visible también en móvil */}
       {!isUser && (
-        <div className="mt-0.5 hidden h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)] md:flex">
-          <Bot className="h-4 w-4" />
+        <div className="mt-0.5 shrink-0">
+          <EliAvatar size={28} state={streaming ? "streaming" : "idle"} />
         </div>
       )}
 

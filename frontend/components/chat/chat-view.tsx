@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   AlertCircle,
-  Sparkles,
   FileText,
   UploadCloud,
   Brain,
@@ -12,6 +11,7 @@ import {
 } from "lucide-react";
 import { MessageBubble } from "./message-bubble";
 import { ChatInput } from "./chat-input";
+import { EliAvatar } from "@/components/eli/eli-avatar";
 import { useAttachment } from "@/lib/hooks/use-attachment";
 import { useNewChatStore } from "@/lib/stores/new-chat-store";
 import type { useChat } from "@/lib/hooks/use-chat";
@@ -75,7 +75,6 @@ export function ChatView({ chat, title }: ChatViewProps) {
   }, [state.messages, proactiveNotice]);
 
   // Sincronizar el store global con el conversationId activo del hook.
-  // Así el sidebar puede marcar la conversación activa sin depender de la URL.
   useEffect(() => {
     setActiveConversationId(chat.conversationId);
   }, [chat.conversationId, setActiveConversationId]);
@@ -163,8 +162,8 @@ export function ChatView({ chat, title }: ChatViewProps) {
 
             {proactiveNotice && (
               <div className="flex w-full justify-start gap-2 px-3 py-2 md:gap-3 md:px-4 md:py-4">
-                <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
-                  <FileText className="h-4 w-4" />
+                <div className="mt-0.5 shrink-0">
+                  <EliAvatar size={28} state="happy" />
                 </div>
                 <div className="max-w-[85%] rounded-2xl rounded-bl-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 py-2 text-sm text-[var(--color-foreground)] md:max-w-[min(720px,80%)] md:px-4 md:py-2.5">
                   <p>
@@ -230,11 +229,9 @@ function EmptyState() {
   return (
     <div className="flex h-full flex-col justify-end px-4 pb-2 md:justify-center md:pb-0">
       <div className="mx-auto w-full max-w-md">
-        <div className="mb-5 flex flex-col items-center text-center md:items-start md:text-left">
-          <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
-            <Sparkles className="h-5 w-5" />
-          </div>
-          <h2 className="mt-3 text-lg font-semibold">¿En qué te ayudo hoy?</h2>
+        <div className="mb-6 flex flex-col items-center text-center md:items-start md:text-left">
+          <EliAvatar size={56} state="idle" />
+          <h2 className="mt-4 text-lg font-semibold">¿En qué te ayudo hoy?</h2>
         </div>
 
         <div className="space-y-1.5">
