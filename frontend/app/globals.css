@@ -217,3 +217,99 @@ html, body {
 .flex > * {
   min-width: 0;
 }
+/* ==========================================================================
+   Animaciones del avatar de ELI
+   ========================================================================== */
+
+/* Respiración base (idle) */
+@keyframes eli-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.95;
+  }
+  50% {
+    transform: scale(1.04);
+    opacity: 1;
+  }
+}
+
+/* Pulso del halo */
+@keyframes eli-halo-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.15);
+  }
+}
+
+/* Rotación lenta del spark */
+@keyframes eli-spark-spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Destello breve (happy) */
+@keyframes eli-flash {
+  0% {
+    box-shadow: 0 0 0 0 rgba(167, 139, 250, 0.7);
+  }
+  100% {
+    box-shadow: 0 0 0 12px rgba(167, 139, 250, 0);
+  }
+}
+
+/* Estado base: idle */
+.eli-avatar {
+  animation: eli-breathe 4s ease-in-out infinite;
+  transition: transform 0.2s ease;
+}
+
+.eli-avatar .eli-avatar-halo {
+  animation: eli-halo-pulse 4s ease-in-out infinite;
+}
+
+/* Pensando: más rápido y con rotación */
+.eli-avatar--thinking {
+  animation: eli-breathe 1.5s ease-in-out infinite;
+}
+
+.eli-avatar--thinking .eli-avatar-halo {
+  animation: eli-halo-pulse 1s ease-in-out infinite;
+}
+
+.eli-avatar--thinking .eli-avatar-spark {
+  animation: eli-spark-spin 2.5s linear infinite;
+}
+
+/* Streaming: glow intenso */
+.eli-avatar--streaming {
+  animation: eli-breathe 2s ease-in-out infinite;
+  box-shadow: 0 0 20px rgba(167, 139, 250, 0.4);
+}
+
+.eli-avatar--streaming .eli-avatar-halo {
+  animation: eli-halo-pulse 1.2s ease-in-out infinite;
+}
+
+/* Happy: destello único */
+.eli-avatar--happy {
+  animation: eli-flash 0.6s ease-out;
+}
+
+/* Accesibilidad: sin animaciones si el usuario lo prefiere */
+@media (prefers-reduced-motion: reduce) {
+  .eli-avatar,
+  .eli-avatar .eli-avatar-halo,
+  .eli-avatar .eli-avatar-spark {
+    animation: none !important;
+  }
+}
