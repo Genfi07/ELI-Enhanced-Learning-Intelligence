@@ -52,8 +52,8 @@ export function Sidebar({ user, onNavigate }: SidebarProps) {
   }
 
   return (
-    <aside
-      className="flex h-full w-64 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]"
+<aside
+  className="surface-glass flex h-full w-64 flex-col border-r"
       onClick={(e) => {
         // Cierra el menú en móvil al pulsar cualquier enlace o botón dentro del sidebar
         const target = e.target as HTMLElement;

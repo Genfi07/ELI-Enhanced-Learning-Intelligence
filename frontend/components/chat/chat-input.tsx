@@ -141,12 +141,10 @@ export function ChatInput({
       )}
 
       <div
-        className={cn(
-          "mx-auto flex max-w-3xl items-end gap-2 rounded-xl",
-          "border border-[var(--color-border-strong)] bg-[var(--color-surface)]",
-          "px-3 py-2 transition-colors focus-within:border-[var(--color-primary)]",
-        )}
-      >
+  className={cn(
+    "surface-elevated mx-auto flex max-w-3xl items-end gap-1 rounded-[26px] py-1.5 pl-1.5 pr-2 transition-soft focus-within:border-[var(--color-primary)]/40 md:gap-2 md:py-2 md:pl-2 md:pr-2.5",
+  )}
+>
         {onAttach && (
           <button
             type="button"
@@ -216,10 +214,11 @@ export function ChatInput({
         )}
       </div>
 
-      <p className="mx-auto mt-2 hidden max-w-3xl text-center text-xs text-[var(--color-subtle)] md:block">
-        Enter para enviar · Shift + Enter para nueva línea · Arrastra o pega
-        archivos (Ctrl+V)
-      </p>
+     <p className="mx-auto mt-2 hidden max-w-3xl text-center text-[11px] text-[var(--color-subtle)] md:block">
+  <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-0.5 font-mono text-[10px]">Enter</kbd> enviar ·
+  <kbd className="ml-2 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-0.5 font-mono text-[10px]">Shift+Enter</kbd> nueva línea ·
+  <kbd className="ml-2 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-0.5 font-mono text-[10px]">Ctrl+V</kbd> adjuntar
+</p>
     </div>
   );
 }

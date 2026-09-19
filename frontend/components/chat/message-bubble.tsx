@@ -37,12 +37,12 @@ export function MessageBubble({
       )}
 
       <div
-        className={cn(
-          "max-w-[85%] rounded-2xl px-3.5 py-2 text-sm shadow-sm md:max-w-[min(720px,80%)] md:px-4 md:py-2.5",
-          isUser
-            ? "rounded-br-md bg-[var(--color-primary)] text-white"
-            : "rounded-bl-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-foreground)]",
-        )}
+       className={cn(
+  "max-w-[85%] rounded-2xl px-3.5 py-2 text-sm md:max-w-[min(720px,80%)] md:px-4 md:py-2.5",
+  isUser
+    ? "rounded-br-md text-white bubble-user"
+    : "rounded-bl-md border border-[var(--color-border)] text-[var(--color-foreground)] bubble-assistant",
+)}
       >
         {isUser && attachmentName && (
           <div className="mb-2 inline-flex items-center gap-1.5 rounded bg-white/15 px-2 py-1 text-xs">
